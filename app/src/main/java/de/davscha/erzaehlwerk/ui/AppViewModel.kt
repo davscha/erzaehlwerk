@@ -826,6 +826,102 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     val writtenWords: Int get() = allScenes().sumOf { (_, s) -> s.text.split(Regex("\\s+")).count { it.isNotBlank() } }
 
+    // ---------- Bilder für Szenen und Titelbild ----------
+
+    private fun poseExamples() = "Ausdruck: ${TagLibrary.examples("pose:expression", 25)}\nHaltung: ${TagLibrary.examples("pose:posture", 20)}\n" +
+        "Gesten: ${TagLibrary.examples("pose:gesture", 15)}\nKamera: ${TagLibrary.examples("pose:camera", 15)}"
+
+    /** Gemma beschreibt den Moment der Szene als Bild-Tags (Handlung, Ausdruck, Bildausschnitt) */
+    private suspend fun sceneTags(sc: Scene, focus: Person?): String {
+        val a = ask(
+            "Du schreibst Prompts für einen Anime-Bildgenerator im Danbooru-Tag-Stil. Du antwortest nur mit einer Komma-Liste englischer Tags.",
+            "Romanszene: ${sc.title} – ${sc.summary}\n${sc.text.take(2500)}\n\n" +
+                "Wähle den eindrucksvollsten Moment der Szene und beschreibe ihn mit 6 bis 12 englischen Tags" +
+                (focus?.let { ", so wie eine Kamera ${it.name} einfangen würde" } ?: " (ohne Personen, nur Stimmung und Handlung)") +
+                ": Pose/Handlung, Gesichtsausdruck, Blickrichtung, Bildausschnitt, Licht. KEINE Tags zu Haaren, Augen, Kleidung oder Ort.\n\nBewährte Tags zur Auswahl:\n${poseExamples()}",
+            0.5,
+        )
+        return cleanTags(a, TagField.SCENE)
+    }
+
+    /** Wer ist auf dem Szenenbild? Standard: die erste Figur der Szene (SDXL kann mehrere Figuren schlecht auseinanderhalten) */
+    fun defaultFocus(sc: Scene): Person? = sc.peopleIds.firstNotNullOfOrNull { person(it) }
+
+    fun paintScene(chapterId: String, sceneId: String, focusId: String?) {
+        val sc = scene(chapterId, sceneId) ?: return
+        val bookId = worldBookId
+        paintJob(sceneId) { prog -> paintSceneNow(bookId, chapterId, sc, focusId?.let { person(it) }, prog) }
+    }
+
+    private suspend fun paintSceneNow(bookId: String, chapterId: String, sc: Scene, focus: Person?, prog: (Int) -> Unit) {
+        val tags = sceneTags(sc, focus)
+        val pl = place(sc.placeId)
+        val prompt = if (focus != null) ImagePrompt.join("solo", focus.gender.tag, focus.appearance, outfit(focus.outfitId)?.tags, pl?.tags, tags)
+        else ImagePrompt.join(pl?.tags, tags, "scenery, no humans")
+        val seed = focus?.seed?.takeIf { it > 0 } ?: (1..999_999_999L).random()
+        val png = paint(prompt, seed = seed, extraNegative = ImagePrompt.SINGLE_NEGATIVE, onProgress = prog)
+        val name = withContext(Dispatchers.IO) { repo.saveImage(bookId, "szene", png) }
+        if (worldBookId == bookId) scene(chapterId, sc.id)?.let { saveScene(chapterId, it.copy(image = name)) }
+    }
+
+    fun removeSceneImage(chapterId: String, sceneId: String) {
+        scene(chapterId, sceneId)?.let { saveScene(chapterId, it.copy(image = "")) }
+    }
+
+    /** Szenenbilder für alle Szenen ohne Bild, nacheinander */
+    var paintAllStatus by mutableStateOf<String?>(null)
+        private set
+    private var paintAllJob: Job? = null
+
+    fun paintAllScenes() {
+        if (paintAllJob?.isActive == true) return
+        val bookId = worldBookId
+        paintAllJob = viewModelScope.launch {
+            try {
+                val todo = allScenes().filter { it.second.image.isBlank() }
+                todo.forEachIndexed { i, (ch, sc) ->
+                    paintAllStatus = "Bild ${i + 1} von ${todo.size} …"
+                    painting[sc.id] = 0
+                    try {
+                        paintSceneNow(bookId, ch.id, scene(ch.id, sc.id) ?: sc, defaultFocus(sc)) { painting[sc.id] = it }
+                    } finally {
+                        painting.remove(sc.id)
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+            } catch (e: Exception) {
+                writeError = e.message
+            } finally {
+                paintAllStatus = null
+            }
+        }
+    }
+
+    fun stopPaintAll() { paintAllJob?.cancel() }
+
+    fun coverImage(b: Book) = repo.image(b.id, b.cover)
+
+    /** Titelbild: Hauptfigur (falls vorhanden) in einem Moment, der zur Geschichte passt */
+    fun paintCover(book: Book) {
+        val bookId = book.id
+        paintJob("cover-$bookId") { prog ->
+            val hero = world.people.firstOrNull { it.role == Role.HAUPT } ?: world.people.firstOrNull()
+            val a = ask(
+                "Du schreibst Prompts für einen Anime-Bildgenerator im Danbooru-Tag-Stil. Du antwortest nur mit einer Komma-Liste englischer Tags.",
+                "Roman: ${book.title} (${book.genre}). ${plot.synopsis.ifBlank { book.idea }.take(1500)}\n\n" +
+                    "Schreibe 8 bis 14 englische Tags für ein stimmungsvolles Titelbild: Ort/Hintergrund, Licht, Stimmung" +
+                    (hero?.let { ", dazu Pose und Ausdruck von ${it.name}" } ?: "") + ". KEINE Tags zu Haaren, Augen oder Kleidung.",
+                0.7,
+            )
+            val tags = TagLibrary.clean(a, TagField.ANY)
+            val prompt = if (hero != null) ImagePrompt.join("solo", hero.gender.tag, hero.appearance, outfit(hero.outfitId)?.tags, tags, "dramatic lighting")
+            else ImagePrompt.join(tags, "scenery, dramatic lighting")
+            val png = paint(prompt, seed = hero?.seed?.takeIf { it > 0 } ?: (1..999_999_999L).random(), extraNegative = ImagePrompt.SINGLE_NEGATIVE, onProgress = prog)
+            val name = withContext(Dispatchers.IO) { repo.saveImage(bookId, "titel", png) }
+            book(bookId)?.let { saveBook(it.copy(cover = name)) }
+        }
+    }
+
     fun place(id: String) = world.places.firstOrNull { it.id == id }
     fun person(id: String) = world.people.firstOrNull { it.id == id }
 

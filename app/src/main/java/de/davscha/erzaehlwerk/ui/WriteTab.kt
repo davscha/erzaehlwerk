@@ -1,6 +1,10 @@
 package de.davscha.erzaehlwerk.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -121,11 +125,16 @@ fun WriteTab(vm: AppViewModel, book: Book) {
                     OutlinedButton(onClick = { vm.writeScene(book, chapter.id, scene.id, AppViewModel.WriteMode.NEW) }) { Text("🎲 Ganz neu") }
                 }
                 if (!writing && all.any { it.third.text.isBlank() }) OutlinedButton(onClick = { confirmAll = true }) { Text("📚 Alle leeren Szenen schreiben") }
+                if (vm.paintAllStatus != null) FilledTonalButton(onClick = { vm.stopPaintAll() }) { Text("Bilder stoppen (${vm.paintAllStatus})") }
+                else if (!writing && all.any { it.third.image.isBlank() && it.third.text.isNotBlank() }) OutlinedButton(onClick = { vm.paintAllScenes() }, enabled = vm.comfyReady) { Text("🖼️ Bilder für alle Szenen") }
             }
             vm.writeStatus?.let {
                 Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)); Text(it, fontSize = 13.sp) }
             }
             vm.writeError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
+
+            // ---- Szenenbild ----
+            SceneImageBlock(vm, chapter.id, scene)
 
             // ---- Text ----
             OutlinedTextField(
@@ -194,4 +203,44 @@ private fun RewriteDialog(onClose: () -> Unit, onGo: (String) -> Unit) {
         confirmButton = { TextButton(onClick = { onGo(text); onClose() }) { Text("Umschreiben") } },
         dismissButton = { TextButton(onClick = onClose) { Text("Abbrechen") } },
     )
+}
+
+/** Bild zur Szene: malen (mit Auswahl, wer drauf ist), groß ansehen, neu malen, entfernen */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SceneImageBlock(vm: AppViewModel, chapterId: String, scene: de.davscha.erzaehlwerk.data.Scene) {
+    var focusId by remember(scene.id) { mutableStateOf(vm.defaultFocus(scene)?.id) }
+    var full by remember { mutableStateOf(false) }
+    val file = vm.image(scene.image)
+    val busy = vm.painting.containsKey(scene.id)
+    if (full && file != null) FullImage(file) { full = false }
+    if (file != null || busy) {
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            PreviewImage(file, "🖼️", vm.painting[scene.id],
+                Modifier.size(420.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).clickable(enabled = file != null) { full = true })
+        }
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("📷 Im Bild:", fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
+        FilterChip(selected = focusId == null, onClick = { focusId = null }, label = { Text("niemand") })
+        scene.peopleIds.mapNotNull { vm.person(it) }.forEach { p ->
+            FilterChip(selected = focusId == p.id, onClick = { focusId = p.id }, label = { Text("${p.emoji} ${p.name}") })
+        }
+        OutlinedButton(onClick = { vm.paintScene(chapterId, scene.id, focusId) }, enabled = vm.comfyReady && !busy && (scene.text.isNotBlank() || scene.summary.isNotBlank())) {
+            Text(if (file == null) "Szenenbild malen" else "Neu malen")
+        }
+        if (file != null) TextButton(onClick = { vm.removeSceneImage(chapterId, scene.id) }) { Text("Bild entfernen") }
+    }
+    if (!vm.comfyReady) Text("PC/ComfyUI nicht erreichbar – Bilder ausgegraut", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+    vm.paintError[scene.id]?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.error) }
+}
+
+/** Bild bildschirmfüllend – Tipp schließt */
+@Composable
+fun FullImage(file: java.io.File, onClose: () -> Unit) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onClose, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.92f)).clickable { onClose() }, contentAlignment = Alignment.Center) {
+            coil.compose.AsyncImage(model = file, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(16.dp))
+        }
+    }
 }

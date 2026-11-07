@@ -109,7 +109,7 @@ fun ShelfScreen(vm: AppViewModel) {
                     horizontalArrangement = Arrangement.spacedBy(20.dp),
                     verticalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
-                    items(vm.books, key = { it.id }) { b -> BookCover(b) { vm.navigate(Screen.BookPage(b.id)) } }
+                    items(vm.books, key = { it.id }) { b -> BookCover(b, vm.coverImage(b)) { vm.navigate(Screen.BookPage(b.id)) } }
                 }
             }
         }
@@ -118,14 +118,21 @@ fun ShelfScreen(vm: AppViewModel) {
 
 /** Buchrücken-Karte im Regal */
 @Composable
-private fun BookCover(b: Book, onClick: () -> Unit) {
+private fun BookCover(b: Book, cover: java.io.File?, onClick: () -> Unit) {
     Card(onClick = onClick, shape = RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp, topEnd = 14.dp, bottomEnd = 14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Box(
             Modifier.fillMaxWidth().aspectRatio(0.7f)
                 .background(Brush.verticalGradient(listOf(Color(0xFF5B3A1E), Color(0xFF2E1D10)))),
             contentAlignment = Alignment.Center,
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(14.dp)) {
+            if (cover != null) {
+                // Titelbild mit Titel unten drauf
+                coil.compose.AsyncImage(model = cover, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xDD000000)))), contentAlignment = Alignment.BottomCenter) {
+                    Text(b.title, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Color(0xFFF3E2C3),
+                        textAlign = TextAlign.Center, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(12.dp))
+                }
+            } else Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(14.dp)) {
                 Text(b.emoji, fontSize = 48.sp)
                 Spacer(Modifier.width(8.dp))
                 Text(

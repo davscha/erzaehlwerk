@@ -1,6 +1,12 @@
 package de.davscha.erzaehlwerk.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -99,6 +105,21 @@ private fun Overview(vm: AppViewModel, book: Book) {
                 }
             }
             OutlinedTextField(value = book.idea, onValueChange = { vm.saveBook(book.copy(idea = it)) }, label = { Text("Worum soll es gehen?") }, minLines = 5, modifier = Modifier.fillMaxWidth())
+            // Titelbild
+            Row(verticalAlignment = Alignment.Top) {
+                PreviewImage(vm.coverImage(book), book.emoji, vm.painting["cover-${book.id}"], Modifier.width(150.dp).aspectRatio(0.7f).clip(RoundedCornerShape(8.dp)))
+                Spacer(Modifier.width(14.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Titelbild", fontWeight = FontWeight.SemiBold)
+                    Text("Die Hauptfigur in einem Moment, der zur Geschichte passt – erscheint im Regal.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedButton(onClick = { vm.paintCover(book) }, enabled = vm.comfyReady && !vm.painting.containsKey("cover-${book.id}")) {
+                        Text(if (book.cover.isBlank()) "Titelbild malen" else "Neu malen")
+                    }
+                    if (book.cover.isNotBlank()) TextButton(onClick = { vm.saveBook(book.copy(cover = "")) }) { Text("Entfernen") }
+                    if (!vm.comfyReady) Text("PC/ComfyUI nicht erreichbar", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                    vm.paintError["cover-${book.id}"]?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.error) }
+                }
+            }
             Text(
                 "Tipp: Unter „Figuren“ und „Orte“ kann die KI dir passend zur Idee etwas vorschlagen. Unter „Plot“ entstehen aus Idee, Bildern, Figuren und Orten das Exposé und der Kapitelplan.",
                 fontSize = 13.sp,
