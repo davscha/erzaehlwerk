@@ -24,14 +24,16 @@ data class Scene(
     val text: String = "",
     /** Szenenbild (Etappe 5) */
     val image: String = "",
+    /** Kurze Zusammenfassung des geschriebenen Textes – für den roten Faden */
+    val recap: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject().put("id", id).put("titel", title).put("inhalt", summary).put("ort", placeId)
-        .put("figuren", JSONArray(peopleIds)).put("text", text).put("bild", image)
+        .put("figuren", JSONArray(peopleIds)).put("text", text).put("bild", image).put("rueckblick", recap)
 
     companion object {
         fun fromJson(o: JSONObject) = Scene(
             o.optString("id").ifEmpty { UUID.randomUUID().toString() }, o.optString("titel"), o.optString("inhalt"), o.optString("ort"),
-            o.optJSONArray("figuren")?.let { a -> List(a.length()) { a.optString(it) } }.orEmpty(), o.optString("text"), o.optString("bild"),
+            o.optJSONArray("figuren")?.let { a -> List(a.length()) { a.optString(it) } }.orEmpty(), o.optString("text"), o.optString("bild"), o.optString("rueckblick"),
         )
     }
 }

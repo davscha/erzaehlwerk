@@ -1,6 +1,7 @@
 package de.davscha.erzaehlwerk.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -63,11 +64,12 @@ fun BookScreen(vm: AppViewModel, bookId: String) {
             Text(book.emoji + "  " + book.title, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Serif, modifier = Modifier.weight(1f), maxLines = 1)
             IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Default.Delete, "Löschen", tint = MaterialTheme.colorScheme.error) }
         }
-        Row(Modifier.padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.padding(horizontal = 24.dp).horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(selected = tab == 0, onClick = { tab = 0 }, label = { Text("📝 Übersicht") })
             FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text("👤 Figuren (${if (vm.worldBookId == bookId) vm.world.people.size else 0})") })
             FilterChip(selected = tab == 2, onClick = { tab = 2 }, label = { Text("🏞️ Orte (${if (vm.worldBookId == bookId) vm.world.places.size else 0})") })
             FilterChip(selected = tab == 3, onClick = { tab = 3 }, label = { Text("📚 Plot (${if (vm.worldBookId == bookId) vm.plot.chapters.size else 0} Kap.)") })
+            FilterChip(selected = tab == 4, onClick = { tab = 4 }, label = { Text("✍️ Schreiben") })
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(top = 8.dp))
         if (vm.worldBookId != bookId) return@Column
@@ -76,6 +78,7 @@ fun BookScreen(vm: AppViewModel, bookId: String) {
             1 -> PeopleTab(vm, book)
             2 -> PlacesTab(vm, book)
             3 -> PlotTab(vm, book)
+            4 -> WriteTab(vm, book)
         }
     }
 }

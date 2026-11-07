@@ -693,6 +693,139 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }))
     }
 
+    // ---------- Schreiben ----------
+
+    /** Szene, an der die KI gerade schreibt (null = keine) */
+    var writingSceneId by mutableStateOf<String?>(null)
+        private set
+    var writeStatus by mutableStateOf<String?>(null)
+        private set
+    var writeError by mutableStateOf<String?>(null)
+        private set
+    private var writeJob: Job? = null
+
+    enum class WriteMode { NEW, CONTINUE, REWRITE }
+
+    private fun scene(chapterId: String, sceneId: String) = plot.chapters.firstOrNull { it.id == chapterId }?.scenes?.firstOrNull { it.id == sceneId }
+
+    fun setSceneText(chapterId: String, sceneId: String, text: String) {
+        val s = scene(chapterId, sceneId) ?: return
+        saveScene(chapterId, s.copy(text = text))
+    }
+
+    /** Während die KI schreibt: nur anzeigen, noch nicht speichern (sonst würde bei jedem Wort gespeichert) */
+    private fun showSceneText(chapterId: String, sceneId: String, text: String) {
+        plot = plot.copy(chapters = plot.chapters.map { ch ->
+            if (ch.id != chapterId) ch else ch.copy(scenes = ch.scenes.map { if (it.id == sceneId) it.copy(text = text) else it })
+        })
+    }
+
+    /** Alle Szenen der Reihe nach (Kapitel-Id, Szene) */
+    private fun allScenes() = plot.chapters.flatMap { ch -> ch.scenes.map { ch to it } }
+
+    private fun systemFor(book: Book): String = buildString {
+        append("Du bist ein begabter Romanautor und schreibst auf Deutsch. ")
+        append("Stil: ${book.style}. Zeitform: ${book.tense}. ")
+        append(when (book.perspective) {
+            "ich" -> "Erzählperspektive: Ich-Erzähler" + (person(book.narratorId)?.let { " – ${it.name} erzählt" } ?: "") + ". "
+            "auktorial" -> "Erzählperspektive: allwissender Erzähler. "
+            else -> "Erzählperspektive: dritte Person, nah an der Hauptfigur der Szene. "
+        })
+        append("Wörtliche Rede steht in „deutschen Anführungszeichen“. Du schreibst nur den Romantext – keine Überschrift, keine Kommentare, keine Zusammenfassung am Ende.")
+    }
+
+    /** Was vor der Szene geschah: Exposé, Rückblicke der letzten Szenen, Ende des vorherigen Textes */
+    private fun contextFor(book: Book, chapterId: String, sceneId: String, short: Boolean): String = buildString {
+        val all = allScenes()
+        val idx = all.indexOfFirst { it.second.id == sceneId }
+        val (ch, sc) = all[idx]
+        if (plot.synopsis.isNotBlank()) appendLine("Worum es im Roman geht: ${plot.synopsis.take(if (short) 600 else 1500)}")
+        val before = all.take(idx)
+        if (before.isNotEmpty()) {
+            appendLine("Bisher geschehen:")
+            before.takeLast(if (short) 5 else 14).forEach { (c, s) ->
+                appendLine("- ${s.recap.ifBlank { s.summary }.take(300)}")
+            }
+            before.last().second.text.takeIf { it.isNotBlank() }?.let { appendLine("So endete die vorige Szene: …${it.takeLast(if (short) 600 else 1500)}") }
+        }
+        appendLine()
+        appendLine("Kapitel ${plot.chapters.indexOf(ch) + 1}: ${ch.title}")
+        appendLine("Diese Szene: ${sc.title} – ${sc.summary}")
+        place(sc.placeId)?.let { appendLine("Ort: ${it.name}${if (it.description.isNotBlank()) " – ${it.description}" else ""}") }
+        val people = sc.peopleIds.mapNotNull { person(it) }
+        if (people.isNotEmpty()) {
+            appendLine("Figuren in der Szene:")
+            people.forEach { p ->
+                val look = p.appearance.takeIf { it.isNotBlank() }?.let { " Aussehen (Stichworte): $it." } ?: ""
+                val outfit = outfit(p.outfitId)?.let { " Kleidung: ${it.name}." } ?: ""
+                appendLine("- ${p.name}${if (p.gender != Gender.UNKNOWN) " (${p.gender.label})" else ""}: ${p.description.take(if (short) 250 else 500)}$look$outfit")
+            }
+        }
+    }
+
+    /** Schreibt eine Szene neu, schreibt sie weiter oder schreibt sie um ([instruction] z. B. "mehr Dialog") */
+    fun writeScene(book: Book, chapterId: String, sceneId: String, mode: WriteMode, instruction: String = "") {
+        if (writingSceneId != null) return
+        writeJob = viewModelScope.launch { runCatching { writeOne(book, chapterId, sceneId, mode, instruction) }.onFailure { if (it !is kotlinx.coroutines.CancellationException) writeError = it.message } ; writingSceneId = null; writeStatus = null }
+    }
+
+    private suspend fun writeOne(book: Book, chapterId: String, sceneId: String, mode: WriteMode, instruction: String) {
+        val s = scene(chapterId, sceneId) ?: return
+        writingSceneId = sceneId
+        writeError = null
+        val short = !usingOllama // Gemma auf dem Tablet hat weniger Gedächtnis
+        val ctx = contextFor(book, chapterId, sceneId, short)
+        val before = s.text
+        val prompt = when (mode) {
+            WriteMode.NEW -> "$ctx\nSchreibe jetzt diese Szene aus, etwa ${book.sceneWords} Wörter. Zeige statt zu erzählen: Handlung, Sinneseindrücke, Gedanken und Dialoge."
+            WriteMode.CONTINUE -> "$ctx\nBisheriger Text der Szene:\n…${before.takeLast(if (short) 1200 else 3000)}\n\nSchreibe die Szene nahtlos weiter, etwa ${book.sceneWords / 3} Wörter. Wiederhole nichts."
+            WriteMode.REWRITE -> "$ctx\nBisheriger Text der Szene:\n${before.take(if (short) 2500 else 6000)}\n\nSchreibe die Szene neu und verbessere sie" +
+                (if (instruction.isNotBlank()) ", und zwar so: $instruction" else "") + ". Etwa ${book.sceneWords} Wörter."
+        }
+        writeStatus = when (mode) { WriteMode.NEW -> "Szene wird geschrieben …"; WriteMode.CONTINUE -> "Wird weitergeschrieben …"; WriteMode.REWRITE -> "Wird umgeschrieben …" }
+        val prefix = if (mode == WriteMode.CONTINUE) before.trimEnd() + "\n\n" else ""
+        val text = ask(systemFor(book), prompt, 0.85) { partial -> showSceneText(chapterId, sceneId, prefix + partial) }
+        val full = (prefix + text).trim()
+        setSceneText(chapterId, sceneId, full)
+        // Rückblick für den roten Faden
+        writeStatus = "Merke mir, was passiert ist …"
+        val recap = runCatching {
+            ask("Du fasst Romanszenen knapp zusammen. Du antwortest nur mit der Zusammenfassung auf Deutsch.",
+                "Fasse diese Szene in zwei Sätzen zusammen – nur was tatsächlich passiert ist, mit Namen:\n\n${full.take(6000)}", 0.3)
+        }.getOrDefault("")
+        scene(chapterId, sceneId)?.let { saveScene(chapterId, it.copy(recap = recap)) }
+    }
+
+    /** Alle noch leeren Szenen nacheinander schreiben */
+    fun writeAll(book: Book) {
+        if (writingSceneId != null) return
+        writeJob = viewModelScope.launch {
+            try {
+                val todo = allScenes().filter { it.second.text.isBlank() }
+                todo.forEachIndexed { i, (ch, sc) ->
+                    writeOne(book, ch.id, sc.id, WriteMode.NEW, "")
+                    writeStatus = "Szene ${i + 1} von ${todo.size} fertig"
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // gestoppt
+            } catch (e: Exception) {
+                writeError = e.message
+            } finally {
+                writingSceneId = null
+                writeStatus = null
+            }
+        }
+    }
+
+    fun stopWriting() {
+        writeJob?.cancel()
+        engine.stop()
+        writingSceneId = null
+        writeStatus = null
+    }
+
+    val writtenWords: Int get() = allScenes().sumOf { (_, s) -> s.text.split(Regex("\\s+")).count { it.isNotBlank() } }
+
     fun place(id: String) = world.places.firstOrNull { it.id == id }
     fun person(id: String) = world.people.firstOrNull { it.id == id }
 
