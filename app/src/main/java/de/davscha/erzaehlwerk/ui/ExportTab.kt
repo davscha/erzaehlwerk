@@ -89,7 +89,55 @@ fun ExportTab(vm: AppViewModel, book: Book) {
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outline)
             Text("🎧 Hörbuch", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
-            Text("Kommt in der nächsten Etappe.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            AudioSection(vm, book, written > 0)
         }
     }
+}
+
+@Composable
+private fun AudioSection(vm: AppViewModel, book: Book, hasText: Boolean) {
+    var menu by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) { vm.loadVoices() }
+    // Bildschirm bleibt an, solange aufgenommen wird
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.DisposableEffect(vm.audioStatus != null) {
+        view.keepScreenOn = vm.audioStatus != null
+        onDispose { view.keepScreenOn = false }
+    }
+    Text("Eine Stimme liest den Roman vor – pro Kapitel eine Datei (M4A) unter Hörbücher/Erzaehlwerk.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    androidx.compose.foundation.layout.Box {
+        OutlinedButton(onClick = { menu = true }) {
+            val v = vm.voices.firstOrNull { it.name == vm.voiceName }
+            Text("🗣️ " + (v?.let { voiceLabel(it) } ?: "Standardstimme"))
+        }
+        androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            androidx.compose.material3.DropdownMenuItem(text = { Text("Standardstimme") }, onClick = { menu = false; vm.changeVoice("") })
+            vm.voices.forEach { v -> androidx.compose.material3.DropdownMenuItem(text = { Text(voiceLabel(v)) }, onClick = { menu = false; vm.changeVoice(v.name) }) }
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Tonhöhe %.2f".format(vm.voicePitch), modifier = Modifier.width(120.dp), fontSize = 13.sp)
+        androidx.compose.material3.Slider(value = vm.voicePitch, onValueChange = { vm.changePitch((it * 20).toInt() / 20f) }, valueRange = 0.5f..2f, modifier = Modifier.weight(1f))
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Tempo %.2f".format(vm.voiceRate), modifier = Modifier.width(120.dp), fontSize = 13.sp)
+        androidx.compose.material3.Slider(value = vm.voiceRate, onValueChange = { vm.changeRate((it * 20).toInt() / 20f) }, valueRange = 0.5f..2f, modifier = Modifier.weight(1f))
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        OutlinedButton(onClick = { vm.previewVoice(book) }, enabled = vm.audioStatus == null) { Text("▶ Probe hören") }
+        if (vm.audioStatus != null) Button(onClick = { vm.stopAudiobook() }) { Text("Stopp") }
+        else Button(onClick = { vm.recordAudiobook(book) }, enabled = hasText) { Text("🎧 Hörbuch aufnehmen") }
+    }
+    vm.audioStatus?.let {
+        androidx.compose.material3.LinearProgressIndicator(progress = { vm.audioProgress }, modifier = Modifier.fillMaxWidth())
+        Text(it, fontSize = 13.sp)
+        Text("Bildschirm bleibt an. Die App bitte offen lassen, bis alles fertig ist.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    vm.audioDone?.let { Text("✓ Fertig – die Kapitel liegen unter $it (auch in Musik- und Hörbuch-Apps sichtbar).", color = MaterialTheme.colorScheme.secondary) }
+}
+
+private fun voiceLabel(v: android.speech.tts.Voice): String {
+    val region = v.locale.displayCountry.ifBlank { "Deutsch" }
+    val n = v.name.substringAfterLast('-').substringAfterLast('#')
+    return "$region · $n" + if (v.isNetworkConnectionRequired) " (online)" else ""
 }

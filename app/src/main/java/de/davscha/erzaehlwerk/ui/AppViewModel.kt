@@ -947,6 +947,79 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---------- Hörbuch ----------
+
+    private val audio = de.davscha.erzaehlwerk.data.AudioBook(app)
+    val voices = mutableStateListOf<android.speech.tts.Voice>()
+    var voiceName by mutableStateOf(prefs.getString("stimme", "") ?: "")
+        private set
+    var voicePitch by mutableStateOf(prefs.getFloat("tonhoehe", 1f))
+        private set
+    var voiceRate by mutableStateOf(prefs.getFloat("tempo", 1f))
+        private set
+    var audioStatus by mutableStateOf<String?>(null)
+        private set
+    var audioProgress by mutableStateOf(0f)
+        private set
+    var audioDone by mutableStateOf<String?>(null)
+        private set
+    private var audioJob: Job? = null
+
+    fun loadVoices() {
+        if (voices.isNotEmpty()) return
+        viewModelScope.launch { runCatching { audio.voices() }.onSuccess { voices.clear(); voices.addAll(it) } }
+    }
+
+    fun changeVoice(name: String) { voiceName = name; prefs.edit().putString("stimme", name).apply() }
+    fun changePitch(v: Float) { voicePitch = v; prefs.edit().putFloat("tonhoehe", v).apply() }
+    fun changeRate(v: Float) { voiceRate = v; prefs.edit().putFloat("tempo", v).apply() }
+
+    fun previewVoice(book: Book) {
+        val sample = allScenes().firstOrNull { it.second.text.isNotBlank() }?.second?.text?.take(220)
+            ?: "Es war einmal, in einem Land weit hinter den Bergen …"
+        viewModelScope.launch { runCatching { audio.preview(sample.replace("*", ""), voiceName, voicePitch, voiceRate) } }
+    }
+
+    /** Sprechtext einer Szene: ohne Sternchen, Absätze als Pausen */
+    private fun speakable(t: String) = t.replace("*", "").replace(Regex("\\s*\n\\s*"), " ").trim()
+
+    /** Das ganze Buch kapitelweise als M4A-Dateien unter Hörbücher/Erzaehlwerk/<Titel> */
+    fun recordAudiobook(book: Book) {
+        if (audioJob?.isActive == true) return
+        audioDone = null
+        audioJob = viewModelScope.launch {
+            try {
+                val chapters = plot.chapters.filter { ch -> ch.scenes.any { it.text.isNotBlank() } }
+                require(chapters.isNotEmpty()) { "Noch keine geschriebenen Szenen." }
+                val folder = book.title.filter { it.isLetterOrDigit() || it == ' ' || it == '-' }.trim().ifBlank { "Roman" }
+                // Titel vorweg: kurze Ansage
+                chapters.forEachIndexed { i, ch ->
+                    audioStatus = "Kapitel ${i + 1} von ${chapters.size}: ${ch.title}"
+                    val parts = mutableListOf("Kapitel ${i + 1}. ${ch.title}.")
+                    if (i == 0) parts.add(0, "${book.title}." + (if (authorName.isNotBlank()) " Von $authorName." else ""))
+                    parts += ch.scenes.filter { it.text.isNotBlank() }.map { speakable(it.text) }
+                    val name = "%02d - %s".format(i + 1, ch.title.filter { it.isLetterOrDigit() || it == ' ' || it == '-' }.trim().take(60))
+                    audio.recordChapter(parts, voiceName, voicePitch, voiceRate, folder, name) { done, total ->
+                        audioProgress = (i + done.toFloat() / total) / chapters.size
+                    }
+                }
+                audioDone = "Hörbücher/Erzaehlwerk/$folder"
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                audioStatus = null
+            } catch (e: Exception) {
+                writeError = e.message
+            } finally {
+                audioStatus = null
+                audioProgress = 0f
+            }
+        }
+    }
+
+    fun stopAudiobook() {
+        audioJob?.cancel()
+        audio.stopSpeaking()
+    }
+
     fun place(id: String) = world.places.firstOrNull { it.id == id }
     fun person(id: String) = world.people.firstOrNull { it.id == id }
 
@@ -1093,6 +1166,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        audio.shutdown()
         internalEngine.close()
         ollamaEngine.close()
     }

@@ -8,4 +8,4 @@ Android-App fürs Tablet: Die KI schreibt Romane, du gibst die Richtung vor – 
 - [x] **4. Schreiben** – Szene für Szene, Stil/Länge/Perspektive/Zeitform, Weiterschreiben, Umschreiben, Neu würfeln; laufende Zusammenfassung für den roten Faden
 - [x] **5. Bilder** – Szenenbild pro Szene und Titelbild über ComfyUI
 - [x] **6. Buch** – PDF und EPUB, mit oder ohne Bilder
-- [ ] **7. Hörbuch** – eine Stimme (Android-Sprachausgabe), kapitelweise als Audiodateien, im Hintergrund mit Fortschritt
+- [x] **7. Hörbuch** – eine Stimme (Android-Sprachausgabe), kapitelweise als Audiodateien, im Hintergrund mit Fortschritt
