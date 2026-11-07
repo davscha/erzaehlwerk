@@ -46,6 +46,26 @@ class BookRepository(private val context: Context) {
         tmp.renameTo(File(dir, "welt.json"))
     }
 
+    fun loadPlot(bookId: String): Plot =
+        runCatching { Plot.fromJson(JSONObject(File(bookDir(bookId), "plot.json").readText())) }.getOrDefault(Plot())
+
+    fun savePlot(bookId: String, plot: Plot) {
+        val dir = bookDir(bookId)
+        val tmp = File(dir, "plot.json.tmp")
+        tmp.writeText(plot.toJson().toString(2))
+        tmp.renameTo(File(dir, "plot.json"))
+    }
+
+    /** Bild aus der Galerie in den Buchordner holen (verkleinert auf 1024 px) */
+    fun importImage(bookId: String, uri: android.net.Uri): String? = runCatching {
+        val bmp = context.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) } ?: return null
+        val scale = minOf(1f, 1024f / maxOf(bmp.width, bmp.height))
+        val scaled = android.graphics.Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt().coerceAtLeast(1), (bmp.height * scale).toInt().coerceAtLeast(1), true)
+        val name = "idee-${System.currentTimeMillis()}.jpg"
+        File(imagesDir(bookId), name).outputStream().use { scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it) }
+        name
+    }.getOrNull()
+
     fun imagesDir(bookId: String) = File(bookDir(bookId), "Bilder").apply { mkdirs() }
 
     fun image(bookId: String, name: String): File? =

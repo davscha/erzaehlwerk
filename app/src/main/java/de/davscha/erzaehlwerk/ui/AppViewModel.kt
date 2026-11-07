@@ -25,6 +25,10 @@ import de.davscha.erzaehlwerk.data.Outfit
 import de.davscha.erzaehlwerk.data.Style
 import de.davscha.erzaehlwerk.data.ImagePrompt
 import de.davscha.erzaehlwerk.data.CharacterFunImport
+import de.davscha.erzaehlwerk.data.Plot
+import de.davscha.erzaehlwerk.data.Chapter
+import de.davscha.erzaehlwerk.data.Scene
+import de.davscha.erzaehlwerk.data.IdeaImage
 import de.davscha.erzaehlwerk.engine.Accelerator
 import de.davscha.erzaehlwerk.engine.ChatEngine
 import de.davscha.erzaehlwerk.engine.ComfyClient
@@ -265,11 +269,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Eine Frage an die KI – Grundlage für Plot und Schreiben in den nächsten Etappen */
-    suspend fun ask(system: String, prompt: String, temperature: Double = 0.8, onChunk: (String) -> Unit = {}): String {
+    suspend fun ask(system: String, prompt: String, temperature: Double = 0.8, imagePath: String? = null, onChunk: (String) -> Unit = {}): String {
         ensureLoaded()
+        if (imagePath != null && !engine.supportsImages) throw IllegalStateException("Das Modell kann keine Bilder ansehen – bei Ollama ein Modell mit Bildern wählen.")
         withContext(Dispatchers.IO) { engine.startConversation(system, emptyList(), temperature) }
         val sb = StringBuilder()
-        engine.send(prompt).collect { sb.append(it); onChunk(sb.toString()) }
+        engine.send(prompt, imagePath).collect { sb.append(it); onChunk(sb.toString()) }
         return sb.toString().trim()
     }
 
@@ -436,6 +441,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (worldBookId == bookId) return
         worldBookId = bookId
         world = repo.loadWorld(bookId)
+        plot = repo.loadPlot(bookId)
     }
 
     private fun updateWorld(w: World) {
@@ -482,6 +488,213 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (worldBookId == bookId) savePlace((world.places.firstOrNull { it.id == p.id } ?: p).copy(preview = name))
         }
     }
+
+    // ---------- Plot: Ideen-Bilder, Exposé, Kapitelplan ----------
+
+    var plot by mutableStateOf(Plot())
+        private set
+    /** Was die KI gerade am Plot macht (null = nichts) */
+    var plotBusy by mutableStateOf<String?>(null)
+        private set
+    var plotError by mutableStateOf<String?>(null)
+        private set
+    /** Ideen-Bilder, die Gemma gerade beschreibt */
+    val describing = mutableStateMapOf<String, Boolean>()
+
+    private fun updatePlot(p: Plot) {
+        plot = p
+        val id = worldBookId
+        viewModelScope.launch(Dispatchers.IO) { repo.savePlot(id, p) }
+    }
+
+    fun addIdeaImage(uri: android.net.Uri) {
+        val bookId = worldBookId
+        viewModelScope.launch {
+            val name = withContext(Dispatchers.IO) { repo.importImage(bookId, uri) } ?: return@launch
+            updatePlot(plot.copy(images = plot.images + IdeaImage(name)))
+            describeIdeaImage(name)
+        }
+    }
+
+    fun setIdeaDescription(file: String, text: String) =
+        updatePlot(plot.copy(images = plot.images.map { if (it.file == file) it.copy(description = text) else it }))
+
+    fun removeIdeaImage(file: String) = updatePlot(plot.copy(images = plot.images.filter { it.file != file }))
+
+    /** Gemma schaut sich ein Ideen-Bild an und beschreibt es als Anregung für die Geschichte */
+    fun describeIdeaImage(file: String) {
+        val path = image(file)?.absolutePath ?: return
+        describing[file] = true
+        viewModelScope.launch {
+            try {
+                val text = ask(
+                    "Du bist Autor und sammelst Ideen für einen Roman. Du antwortest auf Deutsch, ohne Einleitung.",
+                    "Beschreibe dieses Bild in drei bis vier Sätzen als Anregung für eine Geschichte: Wer oder was ist zu sehen, wo, welche Stimmung, was könnte gerade passieren? " +
+                        "Lege das Geschlecht von Personen nur fest, wenn es eindeutig ist.",
+                    0.6, path,
+                )
+                setIdeaDescription(file, text)
+            } catch (e: Exception) {
+                setIdeaDescription(file, "⚠ ${e.message ?: "Fehler"}")
+            } finally {
+                describing.remove(file)
+            }
+        }
+    }
+
+    /** Alles, was die KI über das Buch wissen soll */
+    private fun bookContext(book: Book): String = buildString {
+        appendLine("Roman: \"${book.title}\"${if (book.genre.isNotBlank()) " (Genre: ${book.genre})" else ""}")
+        if (book.idea.isNotBlank()) appendLine("Idee des Autors: ${book.idea.trim()}")
+        plot.images.filter { it.description.isNotBlank() && !it.description.startsWith("⚠") }.forEachIndexed { i, img ->
+            appendLine("Ideen-Bild ${i + 1}: ${img.description.trim()}")
+        }
+        if (world.people.isNotEmpty()) {
+            appendLine("Figuren:")
+            world.people.forEach { appendLine("- ${it.name} (${it.role.label}${if (it.gender != Gender.UNKNOWN) ", ${it.gender.label}" else ""}): ${it.description.take(300)}") }
+        }
+        if (world.places.isNotEmpty()) {
+            appendLine("Orte:")
+            world.places.forEach { appendLine("- ${it.name}: ${it.description.take(200)}") }
+        }
+        if (plot.synopsis.isNotBlank()) appendLine("Exposé: ${plot.synopsis.trim()}")
+    }
+
+    private fun plotJob(label: String, block: suspend () -> Unit) {
+        if (plotBusy != null) return
+        plotBusy = label
+        plotError = null
+        viewModelScope.launch {
+            try {
+                block()
+            } catch (e: Exception) {
+                plotError = e.message ?: "Fehler"
+            } finally {
+                plotBusy = null
+            }
+        }
+    }
+
+    fun setSynopsis(t: String) = updatePlot(plot.copy(synopsis = t))
+
+    /** Exposé: die ganze Geschichte in wenigen Absätzen */
+    fun writeSynopsis(book: Book) = plotJob("Exposé wird geschrieben …") {
+        val ctx = bookContext(book).replace(Regex("Exposé:.*"), "")
+        val text = ask(
+            "Du bist ein erfahrener Romanautor. Du schreibst auf Deutsch, ohne Überschrift und ohne Aufzählungen.",
+            "$ctx\nSchreibe ein Exposé für diesen Roman in zwei bis drei Absätzen: Ausgangslage, Konflikt, Wendepunkte und Ende. " +
+                "Nutze die vorhandenen Figuren und Orte, erfinde aber gern Passendes dazu.",
+            0.85,
+        ) { partial -> plot = plot.copy(synopsis = partial) }
+        setSynopsis(text)
+    }
+
+    /** Kapitelplan in zwei Schritten (für kleine Modelle leichter): erst Kapitel, dann Szenen je Kapitel */
+    fun writeChapterPlan(book: Book, chapterCount: Int, scenesPerChapter: Int) = plotJob("Kapitel werden geplant …") {
+        val ctx = bookContext(book)
+        val a = ask(
+            "Du bist ein erfahrener Romanautor. Du antwortest ausschließlich mit einem JSON-Array, ohne Erklärung, ohne Markdown.",
+            "$ctx\nTeile die Geschichte in genau $chapterCount Kapitel. Für jedes Kapitel ein Objekt: " +
+                "{\"titel\": \"kurzer Kapiteltitel\", \"inhalt\": \"2–3 Sätze, was im Kapitel passiert\"}. Nur das JSON-Array.",
+            0.8,
+        )
+        val arr = jsonArray(a) ?: throw IllegalStateException("Die KI hat keinen Kapitelplan geliefert. Einfach nochmal versuchen.")
+        val chapters = mutableListOf<Chapter>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            chapters += Chapter(title = o.optString("titel").ifBlank { "Kapitel ${i + 1}" }, summary = o.optString("inhalt"))
+        }
+        updatePlot(plot.copy(chapters = chapters))
+        // Szenen je Kapitel
+        chapters.forEachIndexed { i, ch ->
+            plotBusy = "Szenen für Kapitel ${i + 1} von ${chapters.size} …"
+            val placeNames = world.places.joinToString { it.name }
+            val peopleNames = world.people.joinToString { it.name }
+            val s = ask(
+                "Du bist ein erfahrener Romanautor. Du antwortest ausschließlich mit einem JSON-Array, ohne Erklärung, ohne Markdown.",
+                "$ctx\nKapitel ${i + 1}: ${ch.title} – ${ch.summary}\n" +
+                    (if (i > 0) "Vorheriges Kapitel: ${chapters[i - 1].summary}\n" else "") +
+                    "Teile dieses Kapitel in $scenesPerChapter Szenen. Für jede ein Objekt: " +
+                    "{\"titel\": \"…\", \"inhalt\": \"2–3 Sätze, was genau passiert\", \"ort\": \"Name des Ortes\", \"figuren\": [\"Name\", …]}. " +
+                    (if (placeNames.isNotBlank()) "Bekannte Orte (bevorzugt verwenden): $placeNames. " else "") +
+                    (if (peopleNames.isNotBlank()) "Bekannte Figuren: $peopleNames. " else "") +
+                    "Nur das JSON-Array.",
+                0.8,
+            )
+            val sa = jsonArray(s) ?: return@forEachIndexed
+            val scenes = mutableListOf<Scene>()
+            for (k in 0 until sa.length()) {
+                val o = sa.optJSONObject(k) ?: continue
+                val placeId = placeFor(o.optString("ort"))
+                val ids = o.optJSONArray("figuren")?.let { f -> List(f.length()) { personFor(f.optString(it)) } }.orEmpty().filter { it.isNotBlank() }.distinct()
+                scenes += Scene(title = o.optString("titel").ifBlank { "Szene ${k + 1}" }, summary = o.optString("inhalt"), placeId = placeId, peopleIds = ids)
+            }
+            updatePlot(plot.copy(chapters = plot.chapters.map { if (it.id == ch.id) it.copy(scenes = scenes) else it }))
+        }
+    }
+
+    /** Ort zum Namen finden – neue Orte werden angelegt */
+    private fun placeFor(name: String): String {
+        val n = name.trim()
+        if (n.isBlank()) return ""
+        world.places.firstOrNull { it.name.equals(n, true) || it.name.contains(n, true) || n.contains(it.name, true) }?.let { return it.id }
+        val p = Place(name = n)
+        savePlace(p)
+        return p.id
+    }
+
+    /** Figur zum Namen finden – neue Figuren werden als Nebenfigur angelegt */
+    private fun personFor(name: String): String {
+        val n = name.trim()
+        if (n.isBlank() || n.equals("Nutzer", true)) return ""
+        world.people.firstOrNull { it.name.equals(n, true) || it.name.split(' ').first().equals(n.split(' ').first(), true) }?.let { return it.id }
+        val p = Person(name = n)
+        savePerson(p)
+        return p.id
+    }
+
+    // ---- Kapitel und Szenen von Hand bearbeiten ----
+
+    fun saveChapter(c: Chapter) {
+        val l = plot.chapters.toMutableList(); val i = l.indexOfFirst { it.id == c.id }
+        if (i >= 0) l[i] = c else l.add(c)
+        updatePlot(plot.copy(chapters = l))
+    }
+
+    fun deleteChapter(id: String) = updatePlot(plot.copy(chapters = plot.chapters.filter { it.id != id }))
+
+    fun moveChapter(id: String, delta: Int) {
+        val l = plot.chapters.toMutableList(); val i = l.indexOfFirst { it.id == id }; val j = i + delta
+        if (i < 0 || j !in l.indices) return
+        l.add(j, l.removeAt(i))
+        updatePlot(plot.copy(chapters = l))
+    }
+
+    fun saveScene(chapterId: String, s: Scene) {
+        updatePlot(plot.copy(chapters = plot.chapters.map { ch ->
+            if (ch.id != chapterId) ch else {
+                val l = ch.scenes.toMutableList(); val i = l.indexOfFirst { it.id == s.id }
+                if (i >= 0) l[i] = s else l.add(s)
+                ch.copy(scenes = l)
+            }
+        }))
+    }
+
+    fun deleteScene(chapterId: String, id: String) =
+        updatePlot(plot.copy(chapters = plot.chapters.map { if (it.id == chapterId) it.copy(scenes = it.scenes.filter { s -> s.id != id }) else it }))
+
+    fun moveScene(chapterId: String, id: String, delta: Int) {
+        updatePlot(plot.copy(chapters = plot.chapters.map { ch ->
+            if (ch.id != chapterId) ch else {
+                val l = ch.scenes.toMutableList(); val i = l.indexOfFirst { it.id == id }; val j = i + delta
+                if (i >= 0 && j in l.indices) l.add(j, l.removeAt(i))
+                ch.copy(scenes = l)
+            }
+        }))
+    }
+
+    fun place(id: String) = world.places.firstOrNull { it.id == id }
+    fun person(id: String) = world.people.firstOrNull { it.id == id }
 
     // ---------- Gemma hilft ----------
 
@@ -617,7 +830,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (downloads[m.id] !is DownloadState.Running) downloads[m.id] = if (m.isDownloaded(context)) DownloadState.Done else DownloadState.Missing
         }
         fundus = repo.loadFundus()
-        if (worldBookId.isNotBlank()) world = repo.loadWorld(worldBookId)
+        if (worldBookId.isNotBlank()) { world = repo.loadWorld(worldBookId); plot = repo.loadPlot(worldBookId) }
         val loaded = repo.loadBooks()
         books.clear()
         books.addAll(loaded)

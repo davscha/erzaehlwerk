@@ -67,6 +67,7 @@ fun BookScreen(vm: AppViewModel, bookId: String) {
             FilterChip(selected = tab == 0, onClick = { tab = 0 }, label = { Text("📝 Übersicht") })
             FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text("👤 Figuren (${if (vm.worldBookId == bookId) vm.world.people.size else 0})") })
             FilterChip(selected = tab == 2, onClick = { tab = 2 }, label = { Text("🏞️ Orte (${if (vm.worldBookId == bookId) vm.world.places.size else 0})") })
+            FilterChip(selected = tab == 3, onClick = { tab = 3 }, label = { Text("📚 Plot (${if (vm.worldBookId == bookId) vm.plot.chapters.size else 0} Kap.)") })
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(top = 8.dp))
         if (vm.worldBookId != bookId) return@Column
@@ -74,6 +75,7 @@ fun BookScreen(vm: AppViewModel, bookId: String) {
             0 -> Overview(vm, book)
             1 -> PeopleTab(vm, book)
             2 -> PlacesTab(vm, book)
+            3 -> PlotTab(vm, book)
         }
     }
 }
@@ -95,7 +97,7 @@ private fun Overview(vm: AppViewModel, book: Book) {
             }
             OutlinedTextField(value = book.idea, onValueChange = { vm.saveBook(book.copy(idea = it)) }, label = { Text("Worum soll es gehen?") }, minLines = 5, modifier = Modifier.fillMaxWidth())
             Text(
-                "Tipp: Unter „Figuren“ und „Orte“ kann die KI dir passend zur Idee etwas vorschlagen. Als Nächstes kommt der Kapitelplan.",
+                "Tipp: Unter „Figuren“ und „Orte“ kann die KI dir passend zur Idee etwas vorschlagen. Unter „Plot“ entstehen aus Idee, Bildern, Figuren und Orten das Exposé und der Kapitelplan.",
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
