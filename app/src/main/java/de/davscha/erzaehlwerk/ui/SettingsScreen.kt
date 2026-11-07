@@ -104,6 +104,17 @@ fun SettingsScreen(vm: AppViewModel) {
                 HostPort(vm.comfyHost, vm.comfyPort, { vm.changeComfyHost(it) }, { vm.changeComfyPort(it) })
                 StatusRow(vm.comfyStatus) { vm.testComfy() }
                 Text("Ist der PC aus, werden alle Bild-Knöpfe ausgegraut.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(value = vm.basePositive, onValueChange = { vm.changeBasePositive(it) }, label = { Text("Basis positiv (steht immer vorne)") }, minLines = 2, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = vm.baseNegative, onValueChange = { vm.changeBaseNegative(it) }, label = { Text("Basis negativ") }, minLines = 2, modifier = Modifier.fillMaxWidth())
+                Text("Dahinter setzt die App das Trigger-Tag des Stils (aus dem Fundus) und die Bausteine.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (vm.canImportCf) {
+                    var msg by remember { mutableStateOf("") }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(onClick = { val n = vm.importFundusFromCf(); msg = if (n > 0) "✓ $n Teile übernommen" else "Nichts Neues gefunden" }) { Text("Kleidung & Stile aus Character Fun übernehmen") }
+                        Spacer(Modifier.width(12.dp))
+                        Text(msg, fontSize = 13.sp, color = MaterialTheme.colorScheme.secondary)
+                    }
+                }
 
                 Section("KI testen")
                 Text("Aktiv: ${vm.aiLabel}", fontSize = 13.sp)

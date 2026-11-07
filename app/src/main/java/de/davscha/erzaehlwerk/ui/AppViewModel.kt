@@ -14,6 +14,15 @@ import androidx.lifecycle.viewModelScope
 import de.davscha.erzaehlwerk.data.Book
 import de.davscha.erzaehlwerk.data.BookRepository
 import de.davscha.erzaehlwerk.data.TagLibrary
+import de.davscha.erzaehlwerk.data.TagField
+import de.davscha.erzaehlwerk.data.World
+import de.davscha.erzaehlwerk.data.Person
+import de.davscha.erzaehlwerk.data.Place
+import de.davscha.erzaehlwerk.data.Fundus
+import de.davscha.erzaehlwerk.data.Outfit
+import de.davscha.erzaehlwerk.data.Style
+import de.davscha.erzaehlwerk.data.ImagePrompt
+import de.davscha.erzaehlwerk.data.CharacterFunImport
 import de.davscha.erzaehlwerk.engine.Accelerator
 import de.davscha.erzaehlwerk.engine.ChatEngine
 import de.davscha.erzaehlwerk.engine.ComfyClient
@@ -33,6 +42,7 @@ sealed interface Screen {
     data object Shelf : Screen
     data object Settings : Screen
     data class BookPage(val bookId: String) : Screen
+    data object FundusPage : Screen
 }
 
 sealed interface DownloadState {
@@ -312,11 +322,283 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         comfyStatus = PcStatus.Testing
         viewModelScope.launch {
             comfyStatus = try {
-                PcStatus.Ok(ComfyClient(comfyHost, comfyPort).test())
+                PcStatus.Ok(ComfyClient(comfyHost, comfyPort).test()).also { loadLoras() }
             } catch (e: Exception) {
                 PcStatus.Failed("Nicht erreichbar – läuft ComfyUI mit --listen? (${e.message ?: e.javaClass.simpleName})")
             }
         }
+    }
+
+    // ---------- Bilder malen (ComfyUI) ----------
+
+    var basePositive by mutableStateOf(prefs.getString("bild_positiv", null) ?: "masterpiece, highres")
+        private set
+    var baseNegative by mutableStateOf(prefs.getString("bild_negativ", null) ?: "lowres, photorealistic, photo background, multiple views")
+        private set
+    val loras = mutableStateListOf<String>()
+
+    fun changeBasePositive(t: String) { basePositive = t; prefs.edit().putString("bild_positiv", t).apply() }
+    fun changeBaseNegative(t: String) { baseNegative = t; prefs.edit().putString("bild_negativ", t).apply() }
+
+    fun loadLoras() {
+        if (comfyHost.isBlank()) return
+        viewModelScope.launch {
+            runCatching { ComfyClient(comfyHost, comfyPort).loras() }.onSuccess { loras.clear(); loras.addAll(it) }
+        }
+    }
+
+    /** Malt ein Bild: Basis + Stil-Trigger + Tags; gibt PNG-Bytes zurück. PC weg → Knöpfe ausgrauen. */
+    suspend fun paint(tags: String, style: Style? = fundus.defaultStyle, seed: Long = (1..999_999_999L).random(), extraNegative: String = "", onProgress: (Int) -> Unit = {}): ByteArray {
+        require(comfyHost.isNotBlank()) { "ComfyUI ist noch nicht eingerichtet (Einstellungen)." }
+        try {
+            return ComfyClient(comfyHost, comfyPort).generate(
+                ComfyClient.DEFAULT_WORKFLOW, ImagePrompt.join(basePositive, style?.trigger, tags), ImagePrompt.join(baseNegative, extraNegative),
+                seed, style?.lora, style?.strength ?: 1f, onProgress = onProgress,
+            )
+        } catch (e: java.io.IOException) {
+            if (e is java.net.ConnectException || e is java.net.SocketTimeoutException || e is java.net.NoRouteToHostException) {
+                comfyStatus = PcStatus.Failed("Nicht erreichbar (${e.message})")
+            }
+            throw e
+        }
+    }
+
+    /** Ids, deren Bild gerade gemalt wird, und letzte Fehler */
+    val painting = mutableStateMapOf<String, Int>()
+    val paintError = mutableStateMapOf<String, String>()
+
+    private fun paintJob(id: String, block: suspend ((Int) -> Unit) -> Unit) {
+        if (painting.containsKey(id)) return
+        painting[id] = 0
+        paintError.remove(id)
+        viewModelScope.launch {
+            try {
+                block { painting[id] = it }
+            } catch (e: Exception) {
+                paintError[id] = e.message ?: "Fehler"
+            } finally {
+                painting.remove(id)
+            }
+        }
+    }
+
+    // ---------- Fundus (alle Bücher): Kleidung und Stile ----------
+
+    var fundus by mutableStateOf(Fundus())
+        private set
+
+    private fun updateFundus(f: Fundus) {
+        fundus = f
+        viewModelScope.launch(Dispatchers.IO) { repo.saveFundus(f) }
+    }
+
+    fun outfit(id: String) = fundus.clothing.firstOrNull { it.id == id }
+    fun fundusImage(name: String) = repo.fundusImage(name)
+
+    fun saveOutfit(o: Outfit) {
+        val l = fundus.clothing.toMutableList(); val i = l.indexOfFirst { it.id == o.id }
+        if (i >= 0) l[i] = o else l.add(o)
+        updateFundus(fundus.copy(clothing = l))
+    }
+
+    fun deleteOutfit(id: String) = updateFundus(fundus.copy(clothing = fundus.clothing.filter { it.id != id }))
+
+    fun saveStyle(st: Style, makeDefault: Boolean) {
+        val l = fundus.styles.toMutableList(); val i = l.indexOfFirst { it.id == st.id }
+        if (i >= 0) l[i] = st else l.add(st)
+        updateFundus(fundus.copy(styles = l, defaultStyleId = if (makeDefault || fundus.defaultStyleId.isBlank()) st.id else fundus.defaultStyleId))
+    }
+
+    fun deleteStyle(id: String) {
+        val l = fundus.styles.filter { it.id != id }
+        updateFundus(fundus.copy(styles = l, defaultStyleId = if (fundus.defaultStyleId == id) l.firstOrNull()?.id.orEmpty() else fundus.defaultStyleId))
+    }
+
+    fun paintOutfit(o: Outfit) {
+        saveOutfit(o)
+        paintJob(o.id) { prog ->
+            val png = paint(ImagePrompt.outfit(o), extraNegative = ImagePrompt.SINGLE_NEGATIVE, onProgress = prog)
+            val name = withContext(Dispatchers.IO) { repo.saveFundusImage("kleidung", png) }
+            saveOutfit((outfit(o.id) ?: o).copy(preview = name))
+        }
+    }
+
+    // ---------- Welt des geöffneten Buchs: Figuren und Orte ----------
+
+    var worldBookId by mutableStateOf("")
+        private set
+    var world by mutableStateOf(World())
+        private set
+
+    fun openWorld(bookId: String) {
+        if (worldBookId == bookId) return
+        worldBookId = bookId
+        world = repo.loadWorld(bookId)
+    }
+
+    private fun updateWorld(w: World) {
+        world = w
+        val id = worldBookId
+        viewModelScope.launch(Dispatchers.IO) { repo.saveWorld(id, w) }
+    }
+
+    fun image(name: String) = repo.image(worldBookId, name)
+
+    fun savePerson(p: Person) {
+        val l = world.people.toMutableList(); val i = l.indexOfFirst { it.id == p.id }
+        if (i >= 0) l[i] = p else l.add(p)
+        updateWorld(world.copy(people = l))
+    }
+
+    fun deletePerson(id: String) = updateWorld(world.copy(people = world.people.filter { it.id != id }))
+
+    fun savePlace(p: Place) {
+        val l = world.places.toMutableList(); val i = l.indexOfFirst { it.id == p.id }
+        if (i >= 0) l[i] = p else l.add(p)
+        updateWorld(world.copy(places = l))
+    }
+
+    fun deletePlace(id: String) = updateWorld(world.copy(places = world.places.filter { it.id != id }))
+
+    fun paintPerson(p: Person) {
+        savePerson(p)
+        val bookId = worldBookId
+        paintJob(p.id) { prog ->
+            val seed = p.seed.takeIf { it > 0 } ?: (1..999_999_999L).random()
+            val png = paint(ImagePrompt.person(p, outfit(p.outfitId)), seed = seed, extraNegative = ImagePrompt.SINGLE_NEGATIVE, onProgress = prog)
+            val name = withContext(Dispatchers.IO) { repo.saveImage(bookId, "figur", png) }
+            if (worldBookId == bookId) savePerson((world.people.firstOrNull { it.id == p.id } ?: p).copy(preview = name))
+        }
+    }
+
+    fun paintPlace(p: Place) {
+        savePlace(p)
+        val bookId = worldBookId
+        paintJob(p.id) { prog ->
+            val png = paint(ImagePrompt.place(p), onProgress = prog)
+            val name = withContext(Dispatchers.IO) { repo.saveImage(bookId, "ort", png) }
+            if (worldBookId == bookId) savePlace((world.places.firstOrNull { it.id == p.id } ?: p).copy(preview = name))
+        }
+    }
+
+    // ---------- Gemma hilft ----------
+
+    private fun cleanTags(answer: String, field: TagField) =
+        TagLibrary.clean(answer.lines().joinToString(",") { it.trim().trimStart('-', '*', ' ') }.replace("\"", ""), field)
+
+    /** Aus einer Beschreibung Bild-Tags machen (Aussehen, Ort oder Kleidung) */
+    suspend fun tagsFor(description: String, field: TagField): String {
+        val what = when (field) {
+            TagField.APPEARANCE -> "das Aussehen einer Figur (Haare, Augen, Körper, Merkmale – keine Kleidung)"
+            TagField.LOCATION -> "einen Ort (Hintergrund, keine Personen)"
+            TagField.CLOTHING -> "ein Outfit (nur Kleidung und Accessoires)"
+            else -> "ein Bild"
+        }
+        val a = ask(
+            "Du schreibst Prompts für einen Anime-Bildgenerator im Danbooru-Tag-Stil. Du antwortest nur mit einer Komma-Liste englischer Tags.",
+            "Beschreibung: ${description.trim()}\n\nSchreibe 6 bis 15 englische Danbooru-Tags für $what. Nur die Tags.", 0.4,
+        )
+        return cleanTags(a, field)
+    }
+
+    private fun jsonArray(answer: String): org.json.JSONArray? {
+        val a = answer.indexOf('['); val b = answer.lastIndexOf(']')
+        if (a < 0 || b <= a) return null
+        return runCatching { org.json.JSONArray(answer.substring(a, b + 1)) }.getOrNull()
+    }
+
+    /** Gemma schlägt aus der Buch-Idee Figuren vor */
+    suspend fun suggestPeople(book: Book): List<Person> {
+        val known = world.people.joinToString { it.name }
+        val a = ask(
+            "Du bist Autor und entwirfst Figuren für Romane. Du antwortest ausschließlich mit einem JSON-Array, ohne Erklärung, ohne Markdown.",
+            """
+            Roman: "${book.title}" (${book.genre.ifBlank { "Genre frei" }})
+            Idee: ${book.idea.ifBlank { "(noch keine – denk dir etwas Passendes aus)" }}
+            ${if (known.isNotBlank()) "Schon vorhanden (nicht wiederholen): $known" else ""}
+
+            Schlage 4 Figuren vor, die die Geschichte tragen. Für jede ein Objekt:
+            {"name": "…", "emoji": "ein Emoji", "rolle": "Hauptfigur|Nebenfigur|Gegenspieler", "geschlecht": "männlich|weiblich|divers",
+             "beschreibung": "3–4 Sätze auf Deutsch: Persönlichkeit, Hintergrund, Ziel, Sprechweise",
+             "aussehen": "8–12 englische Danbooru-Tags zum Aussehen ohne Kleidung, z. B. long hair, red hair, green eyes"}
+            Gib nur das JSON-Array zurück.
+            """.trimIndent(), 0.9,
+        )
+        val arr = jsonArray(a) ?: throw IllegalStateException("Die KI hat keine Figuren geliefert. Einfach nochmal versuchen.")
+        return List(arr.length()) { i ->
+            val o = arr.getJSONObject(i)
+            Person(
+                name = o.optString("name").ifBlank { "Figur ${i + 1}" },
+                emoji = o.optString("emoji").ifBlank { "🙂" }.take(8),
+                role = when { o.optString("rolle").startsWith("Haupt") -> Role.HAUPT; o.optString("rolle").startsWith("Gegen") -> Role.GEGEN; else -> Role.NEBEN },
+                gender = when (o.optString("geschlecht").lowercase().take(1)) { "m" -> Gender.MALE; "w" -> Gender.FEMALE; "d" -> Gender.DIVERSE; else -> Gender.UNKNOWN },
+                description = o.optString("beschreibung"),
+                appearance = cleanTags(o.optString("aussehen"), TagField.APPEARANCE),
+            )
+        }
+    }
+
+    /** Gemma schlägt aus der Buch-Idee Orte vor */
+    suspend fun suggestPlaces(book: Book): List<Place> {
+        val known = world.places.joinToString { it.name }
+        val a = ask(
+            "Du bist Autor und entwirfst Schauplätze für Romane. Du antwortest ausschließlich mit einem JSON-Array, ohne Erklärung, ohne Markdown.",
+            """
+            Roman: "${book.title}" (${book.genre.ifBlank { "Genre frei" }})
+            Idee: ${book.idea.ifBlank { "(noch keine)" }}
+            ${if (known.isNotBlank()) "Schon vorhanden (nicht wiederholen): $known" else ""}
+
+            Schlage 4 Schauplätze vor. Für jeden ein Objekt:
+            {"name": "…", "beschreibung": "2–3 Sätze auf Deutsch: wie es dort aussieht, riecht, klingt", "tags": "6–10 englische Danbooru-Tags für den Hintergrund"}
+            Gib nur das JSON-Array zurück.
+            """.trimIndent(), 0.9,
+        )
+        val arr = jsonArray(a) ?: throw IllegalStateException("Die KI hat keine Orte geliefert. Einfach nochmal versuchen.")
+        return List(arr.length()) { i ->
+            val o = arr.getJSONObject(i)
+            Place(name = o.optString("name").ifBlank { "Ort ${i + 1}" }, description = o.optString("beschreibung"), tags = cleanTags(o.optString("tags"), TagField.LOCATION))
+        }
+    }
+
+    // ---------- Import aus Character Fun ----------
+
+    val canImportCf get() = CharacterFunImport.available
+
+    fun cfPeople() = CharacterFunImport.people()
+    fun cfPlaces() = CharacterFunImport.places()
+
+    /** Figuren übernehmen (Bild wird in den Buchordner kopiert) */
+    fun importPeople(list: List<CharacterFunImport.CfPerson>) {
+        val bookId = worldBookId
+        list.forEach { cf ->
+            val pic = cf.image?.let { f -> runCatching { repo.saveImage(bookId, "figur", f.readBytes()) }.getOrNull() }.orEmpty()
+            savePerson(cf.person.copy(preview = pic))
+        }
+        importFundusFromCf(quiet = true) // damit Standard-Outfits passen
+    }
+
+    fun importPlaces(list: List<Pair<Place, java.io.File?>>) {
+        val bookId = worldBookId
+        list.forEach { (pl, f) ->
+            val pic = f?.let { runCatching { repo.saveImage(bookId, "ort", it.readBytes()) }.getOrNull() }.orEmpty()
+            savePlace(pl.copy(preview = pic))
+        }
+    }
+
+    /** Kleidung und Stile aus Character Fun in den Fundus übernehmen (Gleiches wird nicht doppelt angelegt) */
+    fun importFundusFromCf(quiet: Boolean = false): Int {
+        val (clothing, styles, def) = CharacterFunImport.clothingAndStyles()
+        var count = 0
+        var f = fundus
+        clothing.forEach { (o, img) ->
+            if (f.clothing.any { it.id == o.id || it.name == o.name }) return@forEach
+            val pic = img?.let { runCatching { repo.saveFundusImage("kleidung", it.readBytes()) }.getOrNull() }.orEmpty()
+            f = f.copy(clothing = f.clothing + o.copy(preview = pic)); count++
+        }
+        styles.forEach { st -> if (f.styles.none { it.lora == st.lora }) { f = f.copy(styles = f.styles + st); count++ } }
+        if (!quiet && def.isNotBlank() && f.styles.any { it.id == def }) f = f.copy(defaultStyleId = def)
+        updateFundus(f)
+        return count
     }
 
     // ---------- Start / Rückkehr in die App ----------
@@ -332,6 +614,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         ModelCatalog.all.forEach { m ->
             if (downloads[m.id] !is DownloadState.Running) downloads[m.id] = if (m.isDownloaded(context)) DownloadState.Done else DownloadState.Missing
         }
+        fundus = repo.loadFundus()
+        if (worldBookId.isNotBlank()) world = repo.loadWorld(worldBookId)
         val loaded = repo.loadBooks()
         books.clear()
         books.addAll(loaded)

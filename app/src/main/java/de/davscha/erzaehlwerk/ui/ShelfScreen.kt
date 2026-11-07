@@ -75,6 +75,11 @@ fun ShelfScreen(vm: AppViewModel) {
                     Text("Erzählwerk", fontSize = 28.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Serif, color = MaterialTheme.colorScheme.primary)
                     Text(vm.aiLabel, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
+                TextButton(onClick = { vm.navigate(Screen.FundusPage) }) {
+                    Text("🎭")
+                    Spacer(Modifier.width(6.dp))
+                    Text("Fundus")
+                }
                 TextButton(onClick = { vm.navigate(Screen.Settings) }) {
                     Icon(Icons.Default.Settings, null)
                     Spacer(Modifier.width(6.dp))
