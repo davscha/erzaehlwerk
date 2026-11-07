@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Aufgeschlagenes Buch mit Feder -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- linke Seite -->
+    <path
+        android:fillColor="#FFF4DC"
+        android:pathData="M54,40C46,35 36,34 28,36v34c8,-2 18,-1 26,4z" />
+    <!-- rechte Seite -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,40c8,-5 18,-6 26,-4v34c-8,-2 -18,-1 -26,4z" />
+    <!-- Zeilen -->
+    <path
+        android:strokeColor="#C9B48A"
+        android:strokeWidth="1.6"
+        android:pathData="M33,46c5,-1 11,-1 16,1M33,52c5,-1 11,-1 16,1M33,58c5,-1 11,-1 16,1M59,47c5,-2 11,-2 16,-1M59,53c5,-2 11,-2 16,-1" />
+    <!-- Feder -->
+    <path
+        android:fillColor="#FFD54F"
+        android:pathData="M84,22c-10,4 -18,14 -22,26l-2,8 6,-6c10,-6 16,-16 18,-28z" />
+    <path
+        android:strokeColor="#6D3FD6"
+        android:strokeWidth="1.6"
+        android:pathData="M60,56L76,32" />
+</vector>

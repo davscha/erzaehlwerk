@@ -1,0 +1,46 @@
+name: APK bauen
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: APK bauen
+        run: gradle assembleDebug --stacktrace
+
+      - name: APK umbenennen
+        run: cp app/build/outputs/apk/debug/app-debug.apk Erzaehlwerk.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Erzaehlwerk
+          path: Erzaehlwerk.apk
+
+      # Immer der neueste Build unter "Releases → latest", direkt vom Tablet ladbar
+      - name: Release aktualisieren
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest Erzaehlwerk.apk \
+            --title "Erzählwerk – Build ${{ github.run_number }}" \
+            --notes "Automatisch gebaut aus ${{ github.sha }}" \
+            --target ${{ github.sha }}
