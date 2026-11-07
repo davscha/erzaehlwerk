@@ -17,6 +17,8 @@ import de.davscha.erzaehlwerk.data.TagLibrary
 import de.davscha.erzaehlwerk.data.TagField
 import de.davscha.erzaehlwerk.data.World
 import de.davscha.erzaehlwerk.data.Person
+import de.davscha.erzaehlwerk.data.Role
+import de.davscha.erzaehlwerk.data.Gender
 import de.davscha.erzaehlwerk.data.Place
 import de.davscha.erzaehlwerk.data.Fundus
 import de.davscha.erzaehlwerk.data.Outfit
