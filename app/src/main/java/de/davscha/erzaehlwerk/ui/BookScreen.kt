@@ -76,6 +76,7 @@ fun BookScreen(vm: AppViewModel, bookId: String) {
             FilterChip(selected = tab == 2, onClick = { tab = 2 }, label = { Text("🏞️ Orte (${if (vm.worldBookId == bookId) vm.world.places.size else 0})") })
             FilterChip(selected = tab == 3, onClick = { tab = 3 }, label = { Text("📚 Plot (${if (vm.worldBookId == bookId) vm.plot.chapters.size else 0} Kap.)") })
             FilterChip(selected = tab == 4, onClick = { tab = 4 }, label = { Text("✍️ Schreiben") })
+            FilterChip(selected = tab == 5, onClick = { tab = 5 }, label = { Text("📤 Ausgabe") })
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(top = 8.dp))
         if (vm.worldBookId != bookId) return@Column
@@ -85,6 +86,7 @@ fun BookScreen(vm: AppViewModel, bookId: String) {
             2 -> PlacesTab(vm, book)
             3 -> PlotTab(vm, book)
             4 -> WriteTab(vm, book)
+            5 -> ExportTab(vm, book)
         }
     }
 }

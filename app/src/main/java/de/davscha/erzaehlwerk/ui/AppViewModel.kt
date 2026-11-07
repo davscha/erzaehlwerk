@@ -922,6 +922,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---------- Buch ausgeben: PDF / EPUB ----------
+
+    var authorName by mutableStateOf(prefs.getString("autor", "") ?: "")
+        private set
+
+    fun changeAuthor(n: String) { authorName = n; prefs.edit().putString("autor", n).apply() }
+
+    var exporting by mutableStateOf(false)
+        private set
+
+    /** [epub] = false: PDF. Gibt die Adresse der Datei (Dokumente/Erzaehlwerk) zurück. */
+    suspend fun exportBook(book: Book, epub: Boolean, withImages: Boolean): android.net.Uri? {
+        exporting = true
+        try {
+            val bookId = book.id
+            val images = de.davscha.erzaehlwerk.data.BookExporter.Images { repo.image(bookId, it) }
+            return withContext(Dispatchers.IO) {
+                if (epub) de.davscha.erzaehlwerk.data.BookExporter.epub(context, book, plot, authorName, withImages, images)
+                else de.davscha.erzaehlwerk.data.BookExporter.pdf(context, book, plot, authorName, withImages, images)
+            }
+        } finally {
+            exporting = false
+        }
+    }
+
     fun place(id: String) = world.places.firstOrNull { it.id == id }
     fun person(id: String) = world.people.firstOrNull { it.id == id }
 
