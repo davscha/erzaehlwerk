@@ -79,7 +79,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 Section("KI auf dem PC (Ollama)")
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Ollama bevorzugen", modifier = Modifier.weight(1f))
-                    Switch(checked = vm.preferOllama, onCheckedChange = { vm.setPreferOllama(it) })
+                    Switch(checked = vm.preferOllama, onCheckedChange = { vm.changePreferOllama(it) })
                 }
                 if (vm.preferOllama) {
                     HostPort(vm.ollamaHost, vm.ollamaPort, { vm.changeOllamaHost(it) }, { vm.changeOllamaPort(it) })

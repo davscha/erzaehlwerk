@@ -148,7 +148,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         else -> "${selectedModel.title} · Tablet"
     }
 
-    fun setPreferOllama(on: Boolean) {
+    fun changePreferOllama(on: Boolean) {
         preferOllama = on
         prefs.edit().putBoolean("ollama_bevorzugen", on).apply()
         engineState = EngineState.Idle
