@@ -26,6 +26,7 @@ import de.davscha.erzaehlwerk.data.Style
 import de.davscha.erzaehlwerk.data.ImagePrompt
 import de.davscha.erzaehlwerk.data.CharacterFunImport
 import de.davscha.erzaehlwerk.data.Plot
+import de.davscha.erzaehlwerk.data.Genre
 import de.davscha.erzaehlwerk.data.Chapter
 import de.davscha.erzaehlwerk.data.Scene
 import de.davscha.erzaehlwerk.data.IdeaImage
@@ -49,6 +50,7 @@ sealed interface Screen {
     data object Settings : Screen
     data class BookPage(val bookId: String) : Screen
     data object FundusPage : Screen
+    data object GenresPage : Screen
 }
 
 sealed interface DownloadState {
@@ -107,10 +109,60 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun book(id: String) = books.firstOrNull { it.id == id }
 
-    fun createBook(title: String, idea: String, genre: String): Book {
-        val b = Book(title = title.trim().ifBlank { "Neuer Roman" }, idea = idea.trim(), genre = genre, emoji = Book.emojis[genre] ?: "📖")
+    fun createBook(title: String, idea: String, genreId: String): Book {
+        val base = Book(title = title.trim().ifBlank { "Neuer Roman" }, idea = idea.trim())
+        val b = genre(genreId)?.let { withGenre(base, it) } ?: base
         saveBook(b)
         return b
+    }
+
+    // ---------- Genres ----------
+
+    val genres = mutableStateListOf<Genre>()
+
+    fun genre(id: String) = genres.firstOrNull { it.id == id }
+
+    /** Genre eines Buchs (über die Id, sonst über den Namen) */
+    fun genreOf(b: Book): Genre? = genre(b.genreId) ?: genres.firstOrNull { b.genre.isNotBlank() && it.name.equals(b.genre, true) }
+
+    /** Buch bekommt ein Genre – mit Emoji und den Standards des Genres */
+    fun withGenre(b: Book, g: Genre?, defaults: Boolean = true): Book = when {
+        g == null -> b.copy(genre = "", genreId = "")
+        !defaults -> b.copy(genre = g.name, genreId = g.id, emoji = g.emoji)
+        else -> b.copy(
+            genre = g.name, genreId = g.id, emoji = g.emoji,
+            style = g.style.ifBlank { b.style }, perspective = g.perspective.ifBlank { b.perspective }, tense = g.tense.ifBlank { b.tense },
+        )
+    }
+
+    fun saveGenre(g: Genre) {
+        val i = genres.indexOfFirst { it.id == g.id }
+        if (i >= 0) genres[i] = g else genres.add(g)
+        // Bücher mit diesem Genre zeigen den neuen Namen
+        books.filter { it.genreId == g.id && (it.genre != g.name || it.emoji != g.emoji) }.forEach { saveBook(it.copy(genre = g.name, emoji = g.emoji)) }
+        val l = genres.toList()
+        viewModelScope.launch(Dispatchers.IO) { repo.saveGenres(l) }
+    }
+
+    fun deleteGenre(id: String) {
+        genres.removeAll { it.id == id }
+        val l = genres.toList()
+        viewModelScope.launch(Dispatchers.IO) { repo.saveGenres(l) }
+    }
+
+    /** Hat das geöffnete Buch schon geschriebenen Text? Dann Schreibstil beim Genre-Wechsel behalten. */
+    fun hasText(b: Book) = worldBookId == b.id && plot.chapters.any { c -> c.scenes.any { it.text.isNotBlank() } }
+
+    /** Genre als Satz für die KI */
+    fun genreLine(b: Book): String {
+        val g = genreOf(b) ?: return if (b.genre.isNotBlank()) "Genre: ${b.genre}." else ""
+        return "Genre: ${g.name}." + if (g.description.isNotBlank()) " Was das Genre ausmacht: ${g.description.trim()}" else ""
+    }
+
+    /** Bildstil für das geöffnete Buch: aus dem Genre, sonst Standard */
+    private fun bookStyle(): Style? {
+        val b = book(worldBookId) ?: return fundus.defaultStyle
+        return genreOf(b)?.imageStyleId?.let { id -> fundus.styles.firstOrNull { it.id == id } } ?: fundus.defaultStyle
     }
 
     fun saveBook(b: Book) {
@@ -473,7 +525,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val bookId = worldBookId
         paintJob(p.id) { prog ->
             val seed = p.seed.takeIf { it > 0 } ?: (1..999_999_999L).random()
-            val png = paint(ImagePrompt.person(p, outfit(p.outfitId)), seed = seed, extraNegative = ImagePrompt.SINGLE_NEGATIVE, onProgress = prog)
+            val png = paint(ImagePrompt.person(p, outfit(p.outfitId)), style = bookStyle(), seed = seed, extraNegative = ImagePrompt.SINGLE_NEGATIVE, onProgress = prog)
             val name = withContext(Dispatchers.IO) { repo.saveImage(bookId, "figur", png) }
             if (worldBookId == bookId) savePerson((world.people.firstOrNull { it.id == p.id } ?: p).copy(preview = name))
         }
@@ -483,7 +535,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         savePlace(p)
         val bookId = worldBookId
         paintJob(p.id) { prog ->
-            val png = paint(ImagePrompt.place(p), onProgress = prog)
+            val png = paint(ImagePrompt.place(p), style = bookStyle(), onProgress = prog)
             val name = withContext(Dispatchers.IO) { repo.saveImage(bookId, "ort", png) }
             if (worldBookId == bookId) savePlace((world.places.firstOrNull { it.id == p.id } ?: p).copy(preview = name))
         }
@@ -595,7 +647,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val text = ask(
             "Du bist Romanautor. Du schreibst auf Deutsch, ohne Überschrift.",
             "Ein kurzes Video zeigt nacheinander:\n${sequence(notes)}\n\n" +
-                "Mach daraus die Idee für einen Roman${if (book.genre.isNotBlank()) " (Genre: ${book.genre})" else ""}: zwei bis vier Sätze, worum es gehen soll – Hauptfigur, Ort, Konflikt. " +
+                "${genreLine(book)}\nMach daraus die Idee für einen Roman: zwei bis vier Sätze, worum es gehen soll – Hauptfigur, Ort, Konflikt. " +
                 "Das Video ist nur der Anfang oder die Stimmung, die Geschichte darf weitergehen.",
             0.85,
         ) { partial -> book(book.id)?.let { b -> books[books.indexOf(b)] = b.copy(idea = partial) } }
@@ -620,7 +672,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Alles, was die KI über das Buch wissen soll */
     private fun bookContext(book: Book): String = buildString {
-        appendLine("Roman: \"${book.title}\"${if (book.genre.isNotBlank()) " (Genre: ${book.genre})" else ""}")
+        appendLine("Roman: \"${book.title}\"")
+        genreLine(book).takeIf { it.isNotBlank() }?.let { appendLine(it) }
         if (book.idea.isNotBlank()) appendLine("Idee des Autors: ${book.idea.trim()}")
         plot.images.filter { it.description.isNotBlank() && !it.description.startsWith("⚠") }.forEachIndexed { i, img ->
             appendLine("Ideen-Bild ${i + 1}: ${img.description.trim()}")
@@ -801,6 +854,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun systemFor(book: Book): String = buildString {
         append("Du bist ein begabter Romanautor und schreibst auf Deutsch. ")
+        genreLine(book).takeIf { it.isNotBlank() }?.let { append(it).append(' ') }
         append("Stil: ${book.style}. Zeitform: ${book.tense}. ")
         append(when (book.perspective) {
             "ich" -> "Erzählperspektive: Ich-Erzähler" + (person(book.narratorId)?.let { " – ${it.name} erzählt" } ?: "") + ". "
@@ -935,7 +989,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val prompt = if (focus != null) ImagePrompt.join("solo", focus.gender.tag, focus.appearance, outfit(focus.outfitId)?.tags, pl?.tags, tags)
         else ImagePrompt.join(pl?.tags, tags, "scenery, no humans")
         val seed = focus?.seed?.takeIf { it > 0 } ?: (1..999_999_999L).random()
-        val png = paint(prompt, seed = seed, extraNegative = ImagePrompt.SINGLE_NEGATIVE, onProgress = prog)
+        val png = paint(prompt, style = bookStyle(), seed = seed, extraNegative = ImagePrompt.SINGLE_NEGATIVE, onProgress = prog)
         val name = withContext(Dispatchers.IO) { repo.saveImage(bookId, "szene", png) }
         if (worldBookId == bookId) scene(chapterId, sc.id)?.let { saveScene(chapterId, it.copy(image = name)) }
     }
@@ -984,7 +1038,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val hero = world.people.firstOrNull { it.role == Role.HAUPT } ?: world.people.firstOrNull()
             val a = ask(
                 "Du schreibst Prompts für einen Anime-Bildgenerator im Danbooru-Tag-Stil. Du antwortest nur mit einer Komma-Liste englischer Tags.",
-                "Roman: ${book.title} (${book.genre}). ${plot.synopsis.ifBlank { book.idea }.take(1500)}\n\n" +
+                "Roman: ${book.title}. ${genreLine(book)} ${plot.synopsis.ifBlank { book.idea }.take(1500)}\n\n" +
                     "Schreibe 8 bis 14 englische Tags für ein stimmungsvolles Titelbild: Ort/Hintergrund, Licht, Stimmung" +
                     (hero?.let { ", dazu Pose und Ausdruck von ${it.name}" } ?: "") + ". KEINE Tags zu Haaren, Augen oder Kleidung.",
                 0.7,
@@ -992,7 +1046,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val tags = TagLibrary.clean(a, TagField.ANY)
             val prompt = if (hero != null) ImagePrompt.join("solo", hero.gender.tag, hero.appearance, outfit(hero.outfitId)?.tags, tags, "dramatic lighting")
             else ImagePrompt.join(tags, "scenery, dramatic lighting")
-            val png = paint(prompt, seed = hero?.seed?.takeIf { it > 0 } ?: (1..999_999_999L).random(), extraNegative = ImagePrompt.SINGLE_NEGATIVE, onProgress = prog)
+            val png = paint(prompt, style = bookStyle(), seed = hero?.seed?.takeIf { it > 0 } ?: (1..999_999_999L).random(), extraNegative = ImagePrompt.SINGLE_NEGATIVE, onProgress = prog)
             val name = withContext(Dispatchers.IO) { repo.saveImage(bookId, "titel", png) }
             book(bookId)?.let { saveBook(it.copy(cover = name)) }
         }
@@ -1131,7 +1185,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val a = ask(
             "Du bist Autor und entwirfst Figuren für Romane. Du antwortest ausschließlich mit einem JSON-Array, ohne Erklärung, ohne Markdown.",
             """
-            Roman: "${book.title}" (${book.genre.ifBlank { "Genre frei" }})
+            Roman: "${book.title}". ${genreLine(book).ifBlank { "Genre frei." }}
             Idee: ${book.idea.ifBlank { "(noch keine – denk dir etwas Passendes aus)" }}
             ${if (known.isNotBlank()) "Schon vorhanden (nicht wiederholen): $known" else ""}
 
@@ -1162,7 +1216,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val a = ask(
             "Du bist Autor und entwirfst Schauplätze für Romane. Du antwortest ausschließlich mit einem JSON-Array, ohne Erklärung, ohne Markdown.",
             """
-            Roman: "${book.title}" (${book.genre.ifBlank { "Genre frei" }})
+            Roman: "${book.title}". ${genreLine(book).ifBlank { "Genre frei." }}
             Idee: ${book.idea.ifBlank { "(noch keine)" }}
             ${if (known.isNotBlank()) "Schon vorhanden (nicht wiederholen): $known" else ""}
 
@@ -1233,6 +1287,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (downloads[m.id] !is DownloadState.Running) downloads[m.id] = if (m.isDownloaded(context)) DownloadState.Done else DownloadState.Missing
         }
         fundus = repo.loadFundus()
+        genres.clear()
+        genres.addAll(repo.loadGenres())
         if (worldBookId.isNotBlank()) { world = repo.loadWorld(worldBookId); plot = repo.loadPlot(worldBookId) }
         val loaded = repo.loadBooks()
         books.clear()

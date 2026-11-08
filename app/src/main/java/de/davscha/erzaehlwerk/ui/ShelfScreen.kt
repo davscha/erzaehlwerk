@@ -75,6 +75,11 @@ fun ShelfScreen(vm: AppViewModel) {
                     Text("Erzählwerk", fontSize = 28.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Serif, color = MaterialTheme.colorScheme.primary)
                     Text(vm.aiLabel, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
+                TextButton(onClick = { vm.navigate(Screen.GenresPage) }) {
+                    Text("🏷️")
+                    Spacer(Modifier.width(6.dp))
+                    Text("Genres")
+                }
                 TextButton(onClick = { vm.navigate(Screen.FundusPage) }) {
                     Text("🎭")
                     Spacer(Modifier.width(6.dp))
@@ -165,10 +170,9 @@ private fun NewBookDialog(vm: AppViewModel, onClose: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Titel (darf auch später kommen)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Text("Genre", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Book.genres.forEach { g ->
-                        FilterChip(selected = genre == g, onClick = { genre = if (genre == g) "" else g }, label = { Text("${Book.emojis[g] ?: ""} $g") })
-                    }
+                GenreChips(vm, genre) { genre = it?.id ?: "" }
+                vm.genre(genre)?.description?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 }
                 OutlinedTextField(
                     value = idea,

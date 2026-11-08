@@ -9,7 +9,9 @@ data class Book(
     val title: String = "",
     /** Worum es gehen soll – deine Vorgabe für die KI */
     val idea: String = "",
+    /** Name des Genres (zur Anzeige) und seine Id */
     val genre: String = "",
+    val genreId: String = "",
     /** Titelbild (Dateiname im Buchordner, oder leer) */
     val cover: String = "",
     /** Emoji als Platzhalter, solange es kein Titelbild gibt */
@@ -31,6 +33,7 @@ data class Book(
         .put("titel", title)
         .put("idee", idea)
         .put("genre", genre)
+        .put("genreId", genreId)
         .put("titelbild", cover)
         .put("emoji", emoji)
         .put("stil", style)
@@ -47,6 +50,7 @@ data class Book(
             title = o.optString("titel"),
             idea = o.optString("idee"),
             genre = o.optString("genre"),
+            genreId = o.optString("genreId"),
             cover = o.optString("titelbild"),
             emoji = o.optString("emoji").ifEmpty { "📖" },
             style = o.optString("stil").ifBlank { "lebendig und bildhaft" },

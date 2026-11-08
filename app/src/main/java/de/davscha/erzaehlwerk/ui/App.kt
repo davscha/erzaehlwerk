@@ -16,6 +16,7 @@ fun App(vm: AppViewModel) {
             Screen.Settings -> SettingsScreen(vm)
             is Screen.BookPage -> BookScreen(vm, s.bookId)
             Screen.FundusPage -> FundusScreen(vm)
+            Screen.GenresPage -> GenresScreen(vm)
         }
     }
 }

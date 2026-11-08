@@ -100,6 +100,21 @@ class BookRepository(private val context: Context) {
         return name
     }
 
+    // ---------- Genres ----------
+
+    private val genresFile get() = File(dataDir, "genres.json")
+
+    fun loadGenres(): List<Genre> {
+        if (!genresFile.exists()) return Genre.starter.also { saveGenres(it) }
+        return runCatching { Genre.listFromJson(JSONObject(genresFile.readText())) }.getOrElse { Genre.starter }
+    }
+
+    fun saveGenres(l: List<Genre>) {
+        val tmp = File(dataDir, "genres.json.tmp")
+        tmp.writeText(Genre.listToJson(l).toString(2))
+        tmp.renameTo(genresFile)
+    }
+
     // ---------- Fundus für alle Bücher ----------
 
     val fundusDir: File get() = File(dataDir, "Fundus").apply { mkdirs() }

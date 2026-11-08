@@ -97,15 +97,7 @@ private fun Overview(vm: AppViewModel, book: Book) {
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Column(Modifier.widthIn(max = 760.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             OutlinedTextField(value = book.title, onValueChange = { vm.saveBook(book.copy(title = it)) }, label = { Text("Titel") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Book.genres.forEach { g ->
-                    FilterChip(
-                        selected = book.genre == g,
-                        onClick = { vm.saveBook(book.copy(genre = if (book.genre == g) "" else g, emoji = Book.emojis[g] ?: book.emoji)) },
-                        label = { Text("${Book.emojis[g] ?: ""} $g") },
-                    )
-                }
-            }
+            GenreChips(vm, vm.genreOf(book)?.id ?: "") { g -> vm.saveBook(vm.withGenre(book, g, defaults = !vm.hasText(book))) }
             OutlinedTextField(value = book.idea, onValueChange = { vm.saveBook(book.copy(idea = it)) }, label = { Text("Worum soll es gehen?") }, minLines = 5, enabled = vm.videoStatus == null, modifier = Modifier.fillMaxWidth())
             val pickVideo = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
                 if (uri != null) vm.ideaFromVideo(book, uri)
