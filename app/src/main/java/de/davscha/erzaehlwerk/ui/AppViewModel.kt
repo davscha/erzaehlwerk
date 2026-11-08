@@ -542,6 +542,82 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---- Video als Vorlage ----
+
+    /** Was gerade mit dem Video passiert (null = nichts) */
+    var videoStatus by mutableStateOf<String?>(null)
+        private set
+    /** Gezogene Standbilder (Dateinamen) – für die kleine Leiste */
+    val videoFrames = mutableStateListOf<String>()
+    var videoError by mutableStateOf<String?>(null)
+        private set
+
+    private class FrameNote(val file: String, val second: Int, val text: String)
+
+    /** Standbilder ziehen und von Gemma der Reihe nach beschreiben lassen */
+    private suspend fun analyzeVideo(uri: android.net.Uri): List<FrameNote> {
+        val bookId = worldBookId
+        videoFrames.clear()
+        videoStatus = "Standbilder werden gezogen …"
+        val frames = withContext(Dispatchers.IO) { repo.extractFrames(bookId, uri, 8) }
+        require(frames.isNotEmpty()) { "Aus dem Video ließen sich keine Bilder ziehen." }
+        videoFrames.addAll(frames.map { it.first })
+        val notes = mutableListOf<FrameNote>()
+        frames.forEachIndexed { i, (name, sec) ->
+            videoStatus = "Bild ${i + 1} von ${frames.size} wird angesehen …"
+            val path = repo.image(bookId, name)?.absolutePath ?: return@forEachIndexed
+            val before = notes.lastOrNull()?.let { "Im Bild davor: ${it.text}\n" } ?: ""
+            val text = ask(
+                "Du beschreibst Standbilder aus einem Video als Vorlage für eine Geschichte. Du antwortest auf Deutsch, knapp, ohne Einleitung.",
+                "${before}Das ist Bild ${i + 1} von ${frames.size} (Sekunde $sec). Beschreibe in zwei Sätzen, wer oder was zu sehen ist, wo, und was gerade passiert oder sich verändert hat. " +
+                    "Lege das Geschlecht von Personen nur fest, wenn es eindeutig ist.",
+                0.5, path,
+            )
+            notes += FrameNote(name, sec, text.trim())
+        }
+        return notes
+    }
+
+    private fun videoJob(block: suspend () -> Unit) {
+        if (videoStatus != null) return
+        videoError = null
+        viewModelScope.launch {
+            try { block() } catch (e: Exception) { videoError = e.message ?: "Fehler" } finally { videoStatus = null }
+        }
+    }
+
+    private fun sequence(notes: List<FrameNote>) = notes.mapIndexed { i, n -> "${i + 1}. (Sek. ${n.second}) ${n.text}" }.joinToString("\n")
+
+    /** Kurze Idee („Worum soll es gehen?“) aus einem Video */
+    fun ideaFromVideo(book: Book, uri: android.net.Uri) = videoJob {
+        val notes = analyzeVideo(uri)
+        videoStatus = "Idee wird geschrieben …"
+        val text = ask(
+            "Du bist Romanautor. Du schreibst auf Deutsch, ohne Überschrift.",
+            "Ein kurzes Video zeigt nacheinander:\n${sequence(notes)}\n\n" +
+                "Mach daraus die Idee für einen Roman${if (book.genre.isNotBlank()) " (Genre: ${book.genre})" else ""}: zwei bis vier Sätze, worum es gehen soll – Hauptfigur, Ort, Konflikt. " +
+                "Das Video ist nur der Anfang oder die Stimmung, die Geschichte darf weitergehen.",
+            0.85,
+        ) { partial -> book(book.id)?.let { b -> books[books.indexOf(b)] = b.copy(idea = partial) } }
+        book(book.id)?.let { saveBook(it.copy(idea = text)) }
+    }
+
+    /** Längeres Exposé aus einem Video – auf Wunsch kommen die Standbilder als Ideen-Bilder in den Plot */
+    fun synopsisFromVideo(book: Book, uri: android.net.Uri, keepFrames: Boolean) = videoJob {
+        val notes = analyzeVideo(uri)
+        if (keepFrames) updatePlot(plot.copy(images = plot.images + notes.map { IdeaImage(it.file, it.text) }))
+        videoStatus = "Exposé wird geschrieben …"
+        val ctx = bookContext(book).replace(Regex("Exposé:.*"), "")
+        val text = ask(
+            "Du bist ein erfahrener Romanautor. Du schreibst auf Deutsch, ohne Überschrift und ohne Aufzählungen.",
+            "$ctx\nEin Video gibt die Richtung vor. Es zeigt nacheinander:\n${sequence(notes)}\n\n" +
+                "Schreibe daraus ein Exposé für den Roman in zwei bis drei Absätzen: Ausgangslage, Konflikt, Wendepunkte und Ende. " +
+                "Der Ablauf im Video ist das Gerüst – baue ihn zu einer ganzen Geschichte aus und nutze die vorhandenen Figuren und Orte.",
+            0.85,
+        ) { partial -> plot = plot.copy(synopsis = partial) }
+        setSynopsis(text)
+    }
+
     /** Alles, was die KI über das Buch wissen soll */
     private fun bookContext(book: Book): String = buildString {
         appendLine("Roman: \"${book.title}\"${if (book.genre.isNotBlank()) " (Genre: ${book.genre})" else ""}")

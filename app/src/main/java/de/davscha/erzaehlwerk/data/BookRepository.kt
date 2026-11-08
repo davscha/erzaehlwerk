@@ -66,6 +66,29 @@ class BookRepository(private val context: Context) {
         name
     }.getOrNull()
 
+    /** Standbilder aus einem Video ziehen (gleichmäßig verteilt). Ergebnis: Dateiname und Zeitpunkt in Sekunden. */
+    fun extractFrames(bookId: String, uri: android.net.Uri, count: Int): List<Pair<String, Int>> {
+        val r = android.media.MediaMetadataRetriever()
+        try {
+            r.setDataSource(context, uri)
+            val durMs = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: return emptyList()
+            val out = mutableListOf<Pair<String, Int>>()
+            val stamp = System.currentTimeMillis()
+            for (i in 0 until count) {
+                // Mitte jedes Abschnitts – so kommen Anfang und Ende auch vor
+                val tMs = durMs * (2 * i + 1) / (2 * count)
+                val frame = r.getScaledFrameAtTime(tMs * 1000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 1024, 1024) ?: continue
+                val name = "video-$stamp-$i.jpg"
+                File(imagesDir(bookId), name).outputStream().use { frame.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, it) }
+                frame.recycle()
+                out += name to (tMs / 1000).toInt()
+            }
+            return out
+        } finally {
+            r.release()
+        }
+    }
+
     fun imagesDir(bookId: String) = File(bookDir(bookId), "Bilder").apply { mkdirs() }
 
     fun image(bookId: String, name: String): File? =

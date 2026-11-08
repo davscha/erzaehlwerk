@@ -106,7 +106,19 @@ private fun Overview(vm: AppViewModel, book: Book) {
                     )
                 }
             }
-            OutlinedTextField(value = book.idea, onValueChange = { vm.saveBook(book.copy(idea = it)) }, label = { Text("Worum soll es gehen?") }, minLines = 5, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = book.idea, onValueChange = { vm.saveBook(book.copy(idea = it)) }, label = { Text("Worum soll es gehen?") }, minLines = 5, enabled = vm.videoStatus == null, modifier = Modifier.fillMaxWidth())
+            val pickVideo = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
+                if (uri != null) vm.ideaFromVideo(book, uri)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = { pickVideo.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VideoOnly)) },
+                    enabled = vm.videoStatus == null,
+                ) { Text("🎬 Idee aus Video") }
+                Spacer(Modifier.width(10.dp))
+                Text("Gemma schaut sich Standbilder aus dem Video an und schreibt daraus die Idee.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            VideoProgress(vm)
             // Titelbild
             Row(verticalAlignment = Alignment.Top) {
                 PreviewImage(vm.coverImage(book), book.emoji, vm.painting["cover-${book.id}"], Modifier.width(150.dp).aspectRatio(0.7f).clip(RoundedCornerShape(8.dp)))

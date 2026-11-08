@@ -79,3 +79,26 @@ fun PaintBox(vm: AppViewModel, id: String, file: File?, emoji: String, canPaint:
         }
     }
 }
+
+/** Fortschritt beim Video: Status, Leiste mit Standbildern, Fehler */
+@Composable
+fun VideoProgress(vm: AppViewModel) {
+    if (vm.videoStatus == null && vm.videoError == null) return
+    Column {
+        vm.videoStatus?.let {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(it, fontSize = 13.sp)
+            }
+        }
+        if (vm.videoStatus != null && vm.videoFrames.isNotEmpty()) {
+            androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
+                items(vm.videoFrames.size) { i ->
+                    PreviewImage(vm.image(vm.videoFrames[i]), "🎬", null, Modifier.size(width = 96.dp, height = 64.dp).clip(RoundedCornerShape(6.dp)))
+                }
+            }
+        }
+        vm.videoError?.let { Text(it, fontSize = 13.sp, color = MaterialTheme.colorScheme.error) }
+    }
+}

@@ -115,7 +115,20 @@ fun PlotTab(vm: AppViewModel, book: Book) {
                 value = vm.plot.synopsis, onValueChange = { vm.setSynopsis(it) },
                 label = { Text("Die ganze Geschichte in wenigen Absätzen") }, minLines = 5, enabled = !busy, modifier = Modifier.fillMaxWidth(),
             )
-            Button(onClick = { vm.writeSynopsis(book) }, enabled = !busy) { Text(if (vm.plot.synopsis.isBlank()) "Exposé schreiben lassen" else "Exposé neu schreiben lassen") }
+            var keepFrames by remember { mutableStateOf(true) }
+            val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) vm.synopsisFromVideo(book, uri, keepFrames) }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Button(onClick = { vm.writeSynopsis(book) }, enabled = !busy && vm.videoStatus == null) { Text(if (vm.plot.synopsis.isBlank()) "Exposé schreiben lassen" else "Exposé neu schreiben lassen") }
+                OutlinedButton(
+                    onClick = { pickVideo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
+                    enabled = !busy && vm.videoStatus == null,
+                ) { Text("🎬 Exposé aus Video") }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.material3.Checkbox(checked = keepFrames, onCheckedChange = { keepFrames = it })
+                Text("Standbilder aus dem Video als Ideen-Bilder übernehmen", fontSize = 13.sp)
+            }
+            VideoProgress(vm)
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outline)
             // ---- Kapitelplan ----
