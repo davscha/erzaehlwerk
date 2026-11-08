@@ -27,6 +27,7 @@ import de.davscha.erzaehlwerk.data.ImagePrompt
 import de.davscha.erzaehlwerk.data.CharacterFunImport
 import de.davscha.erzaehlwerk.data.Plot
 import de.davscha.erzaehlwerk.data.Genre
+import de.davscha.erzaehlwerk.data.WritingStyle
 import de.davscha.erzaehlwerk.data.Chapter
 import de.davscha.erzaehlwerk.data.Scene
 import de.davscha.erzaehlwerk.data.IdeaImage
@@ -148,6 +149,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         genres.removeAll { it.id == id }
         val l = genres.toList()
         viewModelScope.launch(Dispatchers.IO) { repo.saveGenres(l) }
+    }
+
+    // ---------- Schreibstile ----------
+
+    val writingStyles = mutableStateListOf<WritingStyle>()
+
+    fun writingStyle(name: String) = writingStyles.firstOrNull { it.name.equals(name, true) }
+
+    /** Speichert einen Stil. Bei neuem Namen bekommen Bücher und Genres den neuen Namen. */
+    fun saveWritingStyle(s: WritingStyle) {
+        val i = writingStyles.indexOfFirst { it.id == s.id }
+        val old = if (i >= 0) writingStyles[i].name else null
+        if (i >= 0) writingStyles[i] = s else writingStyles.add(s)
+        if (old != null && old != s.name) {
+            books.filter { it.style == old }.forEach { saveBook(it.copy(style = s.name)) }
+            genres.filter { it.style == old }.forEach { saveGenre(it.copy(style = s.name)) }
+        }
+        val l = writingStyles.toList()
+        viewModelScope.launch(Dispatchers.IO) { repo.saveWritingStyles(l) }
+    }
+
+    fun deleteWritingStyle(id: String) {
+        writingStyles.removeAll { it.id == id }
+        val l = writingStyles.toList()
+        viewModelScope.launch(Dispatchers.IO) { repo.saveWritingStyles(l) }
     }
 
     /** Hat das geöffnete Buch schon geschriebenen Text? Dann Schreibstil beim Genre-Wechsel behalten. */
@@ -855,7 +881,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun systemFor(book: Book): String = buildString {
         append("Du bist ein begabter Romanautor und schreibst auf Deutsch. ")
         genreLine(book).takeIf { it.isNotBlank() }?.let { append(it).append(' ') }
-        append("Stil: ${book.style}. Zeitform: ${book.tense}. ")
+        append("Stil: ${book.style}. ")
+        writingStyle(book.style)?.description?.takeIf { it.isNotBlank() }?.let { append("So schreibst du in diesem Stil: ${it.trim()} ") }
+        append("Zeitform: ${book.tense}. ")
         append(when (book.perspective) {
             "ich" -> "Erzählperspektive: Ich-Erzähler" + (person(book.narratorId)?.let { " – ${it.name} erzählt" } ?: "") + ". "
             "auktorial" -> "Erzählperspektive: allwissender Erzähler. "
@@ -1289,6 +1317,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         fundus = repo.loadFundus()
         genres.clear()
         genres.addAll(repo.loadGenres())
+        writingStyles.clear()
+        writingStyles.addAll(repo.loadWritingStyles())
         if (worldBookId.isNotBlank()) { world = repo.loadWorld(worldBookId); plot = repo.loadPlot(worldBookId) }
         val loaded = repo.loadBooks()
         books.clear()

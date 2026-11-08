@@ -78,7 +78,7 @@ fun ShelfScreen(vm: AppViewModel) {
                 TextButton(onClick = { vm.navigate(Screen.GenresPage) }) {
                     Text("🏷️")
                     Spacer(Modifier.width(6.dp))
-                    Text("Genres")
+                    Text("Genres & Stile")
                 }
                 TextButton(onClick = { vm.navigate(Screen.FundusPage) }) {
                     Text("🎭")

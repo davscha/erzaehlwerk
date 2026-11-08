@@ -159,8 +159,9 @@ private fun StyleSettings(vm: AppViewModel, book: Book) {
     var narratorMenu by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Stil", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Book.styles.forEach { s -> FilterChip(selected = book.style == s, onClick = { vm.saveBook(book.copy(style = s)) }, label = { Text(s) }) }
+        WritingStyleChips(vm, book.style) { s -> if (s != null) vm.saveBook(book.copy(style = s.name)) }
+        vm.writingStyle(book.style)?.description?.takeIf { it.isNotBlank() }?.let {
+            Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text("Erzählperspektive", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

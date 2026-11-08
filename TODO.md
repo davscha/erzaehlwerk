@@ -15,3 +15,4 @@ Android-App fürs Tablet: Die KI schreibt Romane, du gibst die Richtung vor – 
 - [x] **Video als Vorlage** – Idee (Übersicht) und Exposé (Plot) aus einem kurzen Video: Standbilder ziehen, Gemma beschreibt sie der Reihe nach; Standbilder optional als Ideen-Bilder
 - [ ] Ton/Sprache aus Videos (später, z. B. Spracherkennung auf dem PC)
 - [x] Eigene Genres: Bereich „🏷️ Genres“ mit Beschreibung für die KI, Standard-Schreibstil und Bildstil, „➕ Eigenes …“ im Dialog
+- [x] Eigene Schreibstile mit Beschreibung für die KI („➕ Eigener …“), verwaltet unter „Genres & Stile“

@@ -115,6 +115,21 @@ class BookRepository(private val context: Context) {
         tmp.renameTo(genresFile)
     }
 
+    // ---------- Schreibstile ----------
+
+    private val writingStylesFile get() = File(dataDir, "schreibstile.json")
+
+    fun loadWritingStyles(): List<WritingStyle> {
+        if (!writingStylesFile.exists()) return WritingStyle.starter.also { saveWritingStyles(it) }
+        return runCatching { WritingStyle.listFromJson(JSONObject(writingStylesFile.readText())) }.getOrElse { WritingStyle.starter }
+    }
+
+    fun saveWritingStyles(l: List<WritingStyle>) {
+        val tmp = File(dataDir, "schreibstile.json.tmp")
+        tmp.writeText(WritingStyle.listToJson(l).toString(2))
+        tmp.renameTo(writingStylesFile)
+    }
+
     // ---------- Fundus für alle Bücher ----------
 
     val fundusDir: File get() = File(dataDir, "Fundus").apply { mkdirs() }
