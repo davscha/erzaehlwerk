@@ -9,3 +9,8 @@ Android-App fürs Tablet: Die KI schreibt Romane, du gibst die Richtung vor – 
 - [x] **5. Bilder** – Szenenbild pro Szene und Titelbild über ComfyUI
 - [x] **6. Buch** – PDF und EPUB, mit oder ohne Bilder
 - [x] **7. Hörbuch** – eine Stimme (Android-Sprachausgabe), kapitelweise als Audiodateien, im Hintergrund mit Fortschritt
+
+## Extras
+
+- [x] **Video als Vorlage** – Idee (Übersicht) und Exposé (Plot) aus einem kurzen Video: Standbilder ziehen, Gemma beschreibt sie der Reihe nach; Standbilder optional als Ideen-Bilder
+- [ ] Ton/Sprache aus Videos (später, z. B. Spracherkennung auf dem PC)
