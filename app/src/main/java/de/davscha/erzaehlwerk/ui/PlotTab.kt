@@ -135,7 +135,7 @@ fun PlotTab(vm: AppViewModel, book: Book) {
             Text("📚 Kapitelplan", fontWeight = FontWeight.SemiBold)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Kapitel: ${chapterCount.toInt()}", modifier = Modifier.width(110.dp))
-                Slider(value = chapterCount, onValueChange = { chapterCount = it }, valueRange = 3f..20f, steps = 16, modifier = Modifier.weight(1f))
+                Slider(value = chapterCount, onValueChange = { chapterCount = it }, valueRange = 1f..20f, steps = 18, modifier = Modifier.weight(1f))
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Szenen je Kapitel: ${scenesPer.toInt()}", modifier = Modifier.width(170.dp))

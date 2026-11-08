@@ -670,7 +670,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val ctx = bookContext(book)
         val a = ask(
             "Du bist ein erfahrener Romanautor. Du antwortest ausschließlich mit einem JSON-Array, ohne Erklärung, ohne Markdown.",
-            "$ctx\nTeile die Geschichte in genau $chapterCount Kapitel. Für jedes Kapitel ein Objekt: " +
+            "$ctx\n" + (if (chapterCount == 1) "Es ist eine Kurzgeschichte mit genau einem Kapitel. Gib ein Array mit genau einem Objekt zurück: " else "Teile die Geschichte in genau $chapterCount Kapitel. Für jedes Kapitel ein Objekt: ") +
                 "{\"titel\": \"kurzer Kapiteltitel\", \"inhalt\": \"2–3 Sätze, was im Kapitel passiert\"}. Nur das JSON-Array.",
             0.8,
         )
