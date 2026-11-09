@@ -8,8 +8,8 @@ import java.util.UUID
 enum class Role(val label: String) { HAUPT("Hauptfigur"), NEBEN("Nebenfigur"), GEGEN("Gegenspieler") }
 
 /** Geschlecht – für Anrede, Grammatik und das Bild-Tag */
-enum class Gender(val label: String, val tag: String) {
-    UNKNOWN("keine Angabe", ""), MALE("männlich", "1boy"), FEMALE("weiblich", "1girl"), DIVERSE("divers", "1other");
+enum class Gender(val label: String, val tag: String, val word: String) {
+    UNKNOWN("keine Angabe", "", "a person"), MALE("männlich", "1boy", "a man"), FEMALE("weiblich", "1girl", "a woman"), DIVERSE("divers", "1other", "a person");
 
     companion object {
         fun of(n: String?) = entries.firstOrNull { it.name == n } ?: UNKNOWN
@@ -100,21 +100,27 @@ data class Outfit(
     }
 }
 
-/** Bildstil = LoRA; Trigger-Tag = Dateiname ohne Ordner und Endung */
+/** Bildstil in Worten (MOSS Image versteht Sätze) – z. B. „classic Disney animation style, soft colors“ */
 data class Style(
     val id: String = UUID.randomUUID().toString(),
     val name: String = "",
+    /** Beschreibung des Stils auf Englisch, steht vorne im Bild-Prompt */
+    val prompt: String = "",
+    /** Alt (NoobAI-LoRA) – wird nicht mehr benutzt */
     val lora: String = "",
     val strength: Float = 1f,
 ) {
-    val trigger: String get() = lora.substringAfterLast('\\').substringAfterLast('/').substringBeforeLast('.')
+    /** Was in den Prompt kommt */
+    val trigger: String get() = prompt
 
-    fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("lora", lora).put("staerke", strength.toDouble())
+    fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("prompt", prompt).put("lora", lora).put("staerke", strength.toDouble())
 
     companion object {
         fun fromJson(o: JSONObject) = Style(
-            o.optString("id").ifEmpty { UUID.randomUUID().toString() }, o.optString("name"), o.optString("lora"),
-            o.optDouble("staerke", 1.0).toFloat(),
+            o.optString("id").ifEmpty { UUID.randomUUID().toString() }, o.optString("name"),
+            // Alte LoRA-Stile: Stil-Beschreibung nachliefern
+            o.optString("prompt").ifBlank { if (o.optString("lora").isNotBlank()) "anime illustration, clean lineart, soft colors" else "" },
+            o.optString("lora"), o.optDouble("staerke", 1.0).toFloat(),
         )
     }
 }
@@ -135,8 +141,17 @@ data class Fundus(val clothing: List<Outfit> = emptyList(), val styles: List<Sty
             o.optString("standardStil"),
         )
 
+        /** Stile für MOSS Image (in Worten) */
+        val mossStyles = listOf(
+            Style(id = "stil-disney", name = "Disney-Zeichentrick", prompt = "classic Disney animation style, hand-drawn, soft colors, expressive faces"),
+            Style(id = "stil-anime", name = "Anime", prompt = "anime illustration, clean lineart, vibrant colors"),
+            Style(id = "stil-comic", name = "Comic", prompt = "western comic book art, bold ink outlines, flat colors"),
+            Style(id = "stil-aquarell", name = "Aquarell", prompt = "soft watercolor painting, storybook illustration, gentle colors"),
+            Style(id = "stil-foto", name = "Foto (realistisch)", prompt = "realistic photo, cinematic lighting, 35mm lens"),
+        )
+
         val starter: Fundus get() {
-            val pandora = Style(id = "stil-pandora", name = "Pandora's Box", lora = "NoobAi\\PandorasBoxStyle.safetensors")
+            val pandora = mossStyles.first()
             return Fundus(
                 clothing = listOf(
                     Outfit(name = "Alltag mit Mantel", tags = "brown coat, white sweater, turtleneck, black pants"),
@@ -145,7 +160,7 @@ data class Fundus(val clothing: List<Outfit> = emptyList(), val styles: List<Sty
                     Outfit(name = "Rüstung", tags = "armor, breastplate, gauntlets, cape", model = "1boy"),
                     Outfit(name = "Anzug", tags = "black suit, white shirt, necktie", model = "1boy"),
                 ),
-                styles = listOf(pandora),
+                styles = mossStyles,
                 defaultStyleId = pandora.id,
             )
         }
@@ -157,8 +172,11 @@ object ImagePrompt {
     fun join(vararg parts: String?): String = parts.filterNotNull()
         .flatMap { it.split(',', '\n') }.map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString(", ")
 
-    fun person(p: Person, outfit: Outfit?) = join("solo", p.gender.tag, p.appearance, outfit?.tags, "upper body, looking at viewer, simple background")
-    fun place(pl: Place) = join(pl.tags, "scenery, no humans")
-    fun outfit(o: Outfit) = join("solo", o.model, o.tags, "standing, full body, front view, looking at viewer, simple background, white background")
+    /** Figur in Worten: „a woman, long red hair, green eyes, wearing brown coat, white sweater“ */
+    fun looks(p: Person, outfit: Outfit?) = join(p.gender.word, p.appearance, outfit?.tags?.takeIf { it.isNotBlank() }?.let { "wearing $it" })
+
+    fun person(p: Person, outfit: Outfit?) = "Portrait of a single character: ${looks(p, outfit)}. Upper body, looking at the viewer, plain background."
+    fun place(pl: Place) = "Scenery without people: ${join(pl.tags)}."
+    fun outfit(o: Outfit) = "Full body front view of ${if (o.model == "1boy") "a man" else "a young woman"} wearing ${join(o.tags)}, standing, plain white background."
     const val SINGLE_NEGATIVE = "multiple views, reference sheet, character sheet, multiple girls, multiple boys"
 }

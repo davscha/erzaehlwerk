@@ -104,8 +104,11 @@ fun SettingsScreen(vm: AppViewModel) {
                 HostPort(vm.comfyHost, vm.comfyPort, { vm.changeComfyHost(it) }, { vm.changeComfyPort(it) })
                 StatusRow(vm.comfyStatus) { vm.testComfy() }
                 Text("Ist der PC aus, werden alle Bild-Knöpfe ausgegraut.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedTextField(value = vm.basePositive, onValueChange = { vm.changeBasePositive(it) }, label = { Text("Basis positiv (steht immer vorne)") }, minLines = 2, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = vm.baseNegative, onValueChange = { vm.changeBaseNegative(it) }, label = { Text("Basis negativ") }, minLines = 2, modifier = Modifier.fillMaxWidth())
+                Text("Workflow: MOSS Image – RealisticFreedom + 4-Step-LoRA, Qwen359B, Flux2-VAE, 6 Schritte. Versteht Sätze, Wortgruppen und Text im Bild.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(value = vm.basePositive, onValueChange = { vm.changeBasePositive(it) }, label = { Text("Kommt in jeden Bild-Prompt") }, minLines = 2, modifier = Modifier.fillMaxWidth())
+                Text("Bildgröße: %.1f Megapixel".format(vm.megapixels), fontSize = 13.sp)
+                androidx.compose.material3.Slider(value = vm.megapixels, onValueChange = { vm.changeMegapixels((it * 2).toInt() / 2f) }, valueRange = 0.5f..4f, steps = 6)
                 Text("Dahinter setzt die App das Trigger-Tag des Stils (aus dem Fundus) und die Bausteine.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (vm.canImportCf) {
                     var msg by remember { mutableStateOf("") }

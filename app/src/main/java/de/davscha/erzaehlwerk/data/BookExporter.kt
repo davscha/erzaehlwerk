@@ -160,6 +160,8 @@ object BookExporter {
             w.y = H * 0.18f
             w.text("Kapitel ${i + 1}", chapNo, Layout.Alignment.ALIGN_CENTER, 4f)
             w.text(ch.title, chapP, Layout.Alignment.ALIGN_CENTER, 22f)
+            // Comicseite des Kapitels: eigene Seite direkt nach der Überschrift
+            if (withImages) images.file(ch.comic)?.let { w.image(it, 0.75f) }
             ch.scenes.filter { it.text.isNotBlank() }.forEachIndexed { k, sc ->
                 if (k > 0) w.text("✦", chapNo, Layout.Alignment.ALIGN_CENTER, 8f)
                 if (withImages) images.file(sc.image)?.let { w.image(it, 0.42f) }
@@ -224,6 +226,7 @@ p { text-indent: 1.2em; margin: 0 0 0.3em 0; text-align: justify; }
         chapters.forEachIndexed { i, ch ->
             pages += "kapitel${i + 1}.xhtml" to xhtml(ch.title, buildString {
                 append("<p class=\"kapnr\">Kapitel ${i + 1}</p>\n<h2>${esc(ch.title)}</h2>\n")
+                pic(ch.comic)?.let { append("<p class=\"bild\"><img src=\"$it\" alt=\"Comicseite\"/></p>\n") }
                 ch.scenes.filter { it.text.isNotBlank() }.forEachIndexed { k, sc ->
                     if (k > 0) append("<p class=\"trenner\">✦</p>\n")
                     pic(sc.image)?.let { append("<p class=\"bild\"><img src=\"$it\" alt=\"${esc(sc.title)}\"/></p>\n") }

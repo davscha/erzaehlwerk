@@ -76,6 +76,9 @@ sealed interface PcStatus {
     data class Failed(val message: String) : PcStatus
 }
 
+/** Szenenbild: alle Figuren der Szene */
+const val ALL = "*alle*"
+
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val context get() = getApplication<Application>()
@@ -407,7 +410,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         comfyStatus = PcStatus.Testing
         viewModelScope.launch {
             comfyStatus = try {
-                PcStatus.Ok(ComfyClient(comfyHost, comfyPort).test()).also { loadLoras() }
+                PcStatus.Ok(ComfyClient(comfyHost, comfyPort).test())
             } catch (e: Exception) {
                 PcStatus.Failed("Nicht erreichbar – läuft ComfyUI mit --listen? (${e.message ?: e.javaClass.simpleName})")
             }
@@ -416,29 +419,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- Bilder malen (ComfyUI) ----------
 
-    var basePositive by mutableStateOf(prefs.getString("bild_positiv", null) ?: "masterpiece, highres")
+    var basePositive by mutableStateOf(prefs.getString("bild_positiv", null) ?: "high quality, detailed")
         private set
-    var baseNegative by mutableStateOf(prefs.getString("bild_negativ", null) ?: "lowres, photorealistic, photo background, multiple views")
+    /** MOSS hat keinen Negativ-Prompt mehr (ConditioningZeroOut) – bleibt nur für eigene Workflows */
+    var baseNegative by mutableStateOf(prefs.getString("bild_negativ", null) ?: "")
         private set
-    val loras = mutableStateListOf<String>()
+    /** Bildgröße in Megapixeln (ResolutionSelector) */
+    var megapixels by mutableStateOf(prefs.getFloat("bild_megapixel", 2f))
+        private set
 
     fun changeBasePositive(t: String) { basePositive = t; prefs.edit().putString("bild_positiv", t).apply() }
     fun changeBaseNegative(t: String) { baseNegative = t; prefs.edit().putString("bild_negativ", t).apply() }
+    fun changeMegapixels(v: Float) { megapixels = v; prefs.edit().putFloat("bild_megapixel", v).apply() }
 
-    fun loadLoras() {
-        if (comfyHost.isBlank()) return
-        viewModelScope.launch {
-            runCatching { ComfyClient(comfyHost, comfyPort).loras() }.onSuccess { loras.clear(); loras.addAll(it) }
-        }
-    }
-
-    /** Malt ein Bild: Basis + Stil-Trigger + Tags; gibt PNG-Bytes zurück. PC weg → Knöpfe ausgrauen. */
-    suspend fun paint(tags: String, style: Style? = fundus.defaultStyle, seed: Long = (1..999_999_999L).random(), extraNegative: String = "", onProgress: (Int) -> Unit = {}): ByteArray {
+    /** Malt ein Bild: Stil + Basis + Beschreibung; gibt PNG-Bytes zurück. PC weg → Knöpfe ausgrauen. */
+    suspend fun paint(
+        text: String, style: Style? = fundus.defaultStyle, seed: Long = (1..999_999_999L).random(),
+        extraNegative: String = "", aspect: String = ComfyClient.LANDSCAPE, onProgress: (Int) -> Unit = {},
+    ): ByteArray {
         require(comfyHost.isNotBlank()) { "ComfyUI ist noch nicht eingerichtet (Einstellungen)." }
+        val positive = listOf(style?.prompt, basePositive, text).filter { !it.isNullOrBlank() }.joinToString(". ") { it!!.trim().trimEnd('.') }
         try {
             return ComfyClient(comfyHost, comfyPort).generate(
-                ComfyClient.DEFAULT_WORKFLOW, ImagePrompt.join(basePositive, style?.trigger, tags), ImagePrompt.join(baseNegative, extraNegative),
-                seed, style?.lora, style?.strength ?: 1f, onProgress = onProgress,
+                ComfyClient.DEFAULT_WORKFLOW, positive, ImagePrompt.join(baseNegative, extraNegative),
+                seed, aspect, megapixels, onProgress = onProgress,
             )
         } catch (e: java.io.IOException) {
             if (e is java.net.ConnectException || e is java.net.SocketTimeoutException || e is java.net.NoRouteToHostException) {
@@ -502,7 +506,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun paintOutfit(o: Outfit) {
         saveOutfit(o)
         paintJob(o.id) { prog ->
-            val png = paint(ImagePrompt.outfit(o), extraNegative = ImagePrompt.SINGLE_NEGATIVE, onProgress = prog)
+            val png = paint(ImagePrompt.outfit(o), aspect = ComfyClient.PORTRAIT, onProgress = prog)
             val name = withContext(Dispatchers.IO) { repo.saveFundusImage("kleidung", png) }
             saveOutfit((outfit(o.id) ?: o).copy(preview = name))
         }
@@ -551,7 +555,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val bookId = worldBookId
         paintJob(p.id) { prog ->
             val seed = p.seed.takeIf { it > 0 } ?: (1..999_999_999L).random()
-            val png = paint(ImagePrompt.person(p, outfit(p.outfitId)), style = bookStyle(), seed = seed, extraNegative = ImagePrompt.SINGLE_NEGATIVE, onProgress = prog)
+            val png = paint(ImagePrompt.person(p, outfit(p.outfitId)), style = bookStyle(), seed = seed, aspect = ComfyClient.PORTRAIT, onProgress = prog)
             val name = withContext(Dispatchers.IO) { repo.saveImage(bookId, "figur", png) }
             if (worldBookId == bookId) savePerson((world.people.firstOrNull { it.id == p.id } ?: p).copy(preview = name))
         }
@@ -986,40 +990,85 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- Bilder für Szenen und Titelbild ----------
 
-    private fun poseExamples() = "Ausdruck: ${TagLibrary.examples("pose:expression", 25)}\nHaltung: ${TagLibrary.examples("pose:posture", 20)}\n" +
-        "Gesten: ${TagLibrary.examples("pose:gesture", 15)}\nKamera: ${TagLibrary.examples("pose:camera", 15)}"
+    /** Englische Beschreibung bereinigen (Markdown, Anführungszeichen, „Prompt:“) */
+    private fun cleanDescription(a: String) = a.replace(Regex("```\\w*"), "").replace(Regex("(?im)^\\s*(prompt|description|bildbeschreibung)\\s*:"), "")
+        .replace("**", "").trim().trim('"').replace(Regex("\\s*\\n+\\s*"), " ")
 
-    /** Gemma beschreibt den Moment der Szene als Bild-Tags (Handlung, Ausdruck, Bildausschnitt) */
-    private suspend fun sceneTags(sc: Scene, focus: Person?): String {
+    /** Wie Figuren aussehen – für die KI, damit sie sie im Bild genau so beschreibt */
+    private fun looksList(people: List<Person>) = people.joinToString("\n") { "- ${it.name}: ${ImagePrompt.looks(it, outfit(it.outfitId))}" }
+
+    /** Die KI beschreibt den Moment der Szene als englisches Bild (MOSS Image versteht ganze Sätze) */
+    private suspend fun sceneDescription(sc: Scene, people: List<Person>): String {
+        val pl = place(sc.placeId)
         val a = ask(
-            "Du schreibst Prompts für einen Anime-Bildgenerator im Danbooru-Tag-Stil. Du antwortest nur mit einer Komma-Liste englischer Tags.",
+            "You write prompts for an image generator that understands natural English. You answer only with the image description, no explanation.",
             "Romanszene: ${sc.title} – ${sc.summary}\n${sc.text.take(2500)}\n\n" +
-                "Wähle den eindrucksvollsten Moment der Szene und beschreibe ihn mit 6 bis 12 englischen Tags" +
-                (focus?.let { ", so wie eine Kamera ${it.name} einfangen würde" } ?: " (ohne Personen, nur Stimmung und Handlung)") +
-                ": Pose/Handlung, Gesichtsausdruck, Blickrichtung, Bildausschnitt, Licht. KEINE Tags zu Haaren, Augen, Kleidung oder Ort.\n\nBewährte Tags zur Auswahl:\n${poseExamples()}",
+                (if (people.isNotEmpty()) "Figuren im Bild und ihr Aussehen (genau so übernehmen, NICHT ihre Namen schreiben, " +
+                    "der Bildgenerator kennt keine Namen):\n${looksList(people)}\n\n" else "Keine Personen im Bild, nur Ort, Stimmung und Handlung.\n\n") +
+                (pl?.let { "Ort: ${it.name} – ${ImagePrompt.join(it.tags)}\n\n" } ?: "") +
+                "Wähle den eindrucksvollsten Moment der Szene und beschreibe ihn als ein Bild in 2 bis 4 englischen Sätzen: " +
+                "wer was tut, Posen, Gesichtsausdrücke, Blickrichtungen, Ort, Licht, Bildausschnitt.",
             0.5,
         )
-        return cleanTags(a, TagField.SCENE)
+        return cleanDescription(a)
     }
 
-    /** Wer ist auf dem Szenenbild? Standard: die erste Figur der Szene (SDXL kann mehrere Figuren schlecht auseinanderhalten) */
+    /** Wer ist auf dem Szenenbild? Standard: alle Figuren der Szene (MOSS kann mehrere Figuren auseinanderhalten) */
     fun defaultFocus(sc: Scene): Person? = sc.peopleIds.firstNotNullOfOrNull { person(it) }
 
+    /** focusId: null = niemand, ALL = alle Figuren der Szene, sonst eine Figur */
     fun paintScene(chapterId: String, sceneId: String, focusId: String?) {
         val sc = scene(chapterId, sceneId) ?: return
         val bookId = worldBookId
-        paintJob(sceneId) { prog -> paintSceneNow(bookId, chapterId, sc, focusId?.let { person(it) }, prog) }
+        val people = when (focusId) {
+            null -> emptyList()
+            ALL -> sc.peopleIds.mapNotNull { person(it) }
+            else -> listOfNotNull(person(focusId))
+        }
+        paintJob(sceneId) { prog -> paintSceneNow(bookId, chapterId, sc, people, prog) }
     }
 
-    private suspend fun paintSceneNow(bookId: String, chapterId: String, sc: Scene, focus: Person?, prog: (Int) -> Unit) {
-        val tags = sceneTags(sc, focus)
-        val pl = place(sc.placeId)
-        val prompt = if (focus != null) ImagePrompt.join("solo", focus.gender.tag, focus.appearance, outfit(focus.outfitId)?.tags, pl?.tags, tags)
-        else ImagePrompt.join(pl?.tags, tags, "scenery, no humans")
-        val seed = focus?.seed?.takeIf { it > 0 } ?: (1..999_999_999L).random()
-        val png = paint(prompt, style = bookStyle(), seed = seed, extraNegative = ImagePrompt.SINGLE_NEGATIVE, onProgress = prog)
+    private suspend fun paintSceneNow(bookId: String, chapterId: String, sc: Scene, people: List<Person>, prog: (Int) -> Unit) {
+        val prompt = sceneDescription(sc, people)
+        // Eine Figur: deren fester Startwert, damit sie wiedererkennbar bleibt
+        val seed = people.singleOrNull()?.seed?.takeIf { it > 0 } ?: (1..999_999_999L).random()
+        val png = paint(prompt, style = bookStyle(), seed = seed, aspect = ComfyClient.LANDSCAPE, onProgress = prog)
         val name = withContext(Dispatchers.IO) { repo.saveImage(bookId, "szene", png) }
         if (worldBookId == bookId) scene(chapterId, sc.id)?.let { saveScene(chapterId, it.copy(image = name)) }
+    }
+
+    // ---------- Kapitel als Comicseite ----------
+
+    /** Die KI plant eine Comicseite aus den Szenen des Kapitels; MOSS malt alle Panels in EINEM Bild */
+    fun paintComic(book: Book, chapterId: String, panels: Int) {
+        val ch = plot.chapters.firstOrNull { it.id == chapterId } ?: return
+        val bookId = book.id
+        paintJob("comic-$chapterId") { prog ->
+            val ids = ch.scenes.flatMap { it.peopleIds }.distinct()
+            val people = ids.mapNotNull { person(it) }.take(5)
+            val story = ch.scenes.joinToString("\n") { sc -> "- ${sc.title}: ${sc.recap.ifBlank { sc.summary }}" + (place(sc.placeId)?.let { " (Ort: ${it.name})" } ?: "") }
+            val a = ask(
+                "You write prompts for an image generator that can draw complete comic pages with several panels and readable text. " +
+                    "You answer only with the prompt, no explanation.",
+                "Kapitel „${ch.title}“ aus dem Roman „${book.title}“. ${genreLine(book)}\nInhalt:\n${ch.summary}\n$story\n\n" +
+                    (if (people.isNotEmpty()) "Figuren und ihr Aussehen (in JEDEM Panel mit genau diesen Worten beschreiben, keine Namen – " +
+                        "der Bildgenerator kennt keine Namen):\n${looksList(people)}\n\n" else "") +
+                    "Schreibe einen englischen Prompt für EINE komplette Comicseite mit genau $panels Panels, die dieses Kapitel erzählen. " +
+                    "Beginne mit „A full comic book page with $panels panels, clean panel borders.“, dann „Panel 1: …“ bis „Panel $panels: …“ " +
+                    "mit Handlung, Figuren, Ort und Bildausschnitt. Jedes Panel bekommt eine kurze DEUTSCHE Bildunterschrift oder Sprechblase " +
+                    "in Anführungszeichen, höchstens 5 Wörter, z. B. caption \"Der Sturm tobte\".",
+                0.6,
+            )
+            val prompt = cleanDescription(a)
+            val seed = people.firstOrNull()?.seed?.takeIf { it > 0 } ?: (1..999_999_999L).random()
+            val png = paint(prompt, style = bookStyle(), seed = seed, aspect = ComfyClient.PORTRAIT, onProgress = prog)
+            val name = withContext(Dispatchers.IO) { repo.saveImage(bookId, "comic", png) }
+            if (worldBookId == bookId) plot.chapters.firstOrNull { it.id == chapterId }?.let { saveChapter(it.copy(comic = name)) }
+        }
+    }
+
+    fun removeComic(chapterId: String) {
+        plot.chapters.firstOrNull { it.id == chapterId }?.let { saveChapter(it.copy(comic = "")) }
     }
 
     fun removeSceneImage(chapterId: String, sceneId: String) {
@@ -1041,7 +1090,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     paintAllStatus = "Bild ${i + 1} von ${todo.size} …"
                     painting[sc.id] = 0
                     try {
-                        paintSceneNow(bookId, ch.id, scene(ch.id, sc.id) ?: sc, defaultFocus(sc)) { painting[sc.id] = it }
+                        val now = scene(ch.id, sc.id) ?: sc
+                        paintSceneNow(bookId, ch.id, now, now.peopleIds.mapNotNull { person(it) }) { painting[sc.id] = it }
                     } finally {
                         painting.remove(sc.id)
                     }
@@ -1065,16 +1115,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         paintJob("cover-$bookId") { prog ->
             val hero = world.people.firstOrNull { it.role == Role.HAUPT } ?: world.people.firstOrNull()
             val a = ask(
-                "Du schreibst Prompts für einen Anime-Bildgenerator im Danbooru-Tag-Stil. Du antwortest nur mit einer Komma-Liste englischer Tags.",
+                "You write prompts for an image generator that understands natural English and can render readable text. You answer only with the prompt.",
                 "Roman: ${book.title}. ${genreLine(book)} ${plot.synopsis.ifBlank { book.idea }.take(1500)}\n\n" +
-                    "Schreibe 8 bis 14 englische Tags für ein stimmungsvolles Titelbild: Ort/Hintergrund, Licht, Stimmung" +
-                    (hero?.let { ", dazu Pose und Ausdruck von ${it.name}" } ?: "") + ". KEINE Tags zu Haaren, Augen oder Kleidung.",
+                    (hero?.let { "Hauptfigur und ihr Aussehen (genau so übernehmen, kein Name): ${ImagePrompt.looks(it, outfit(it.outfitId))}\n\n" } ?: "") +
+                    "Beschreibe auf Englisch in 2 bis 4 Sätzen ein stimmungsvolles Buch-Titelbild: Motiv, Ort, Licht, Stimmung" +
+                    (hero?.let { ", Pose und Ausdruck der Hauptfigur" } ?: "") +
+                    ". Oben steht groß der Titel als Schriftzug: \"${book.title}\".",
                 0.7,
             )
-            val tags = TagLibrary.clean(a, TagField.ANY)
-            val prompt = if (hero != null) ImagePrompt.join("solo", hero.gender.tag, hero.appearance, outfit(hero.outfitId)?.tags, tags, "dramatic lighting")
-            else ImagePrompt.join(tags, "scenery, dramatic lighting")
-            val png = paint(prompt, style = bookStyle(), seed = hero?.seed?.takeIf { it > 0 } ?: (1..999_999_999L).random(), extraNegative = ImagePrompt.SINGLE_NEGATIVE, onProgress = prog)
+            val prompt = cleanDescription(a)
+            val png = paint(prompt, style = bookStyle(), seed = hero?.seed?.takeIf { it > 0 } ?: (1..999_999_999L).random(), aspect = ComfyClient.PORTRAIT, onProgress = prog)
             val name = withContext(Dispatchers.IO) { repo.saveImage(bookId, "titel", png) }
             book(bookId)?.let { saveBook(it.copy(cover = name)) }
         }
@@ -1195,8 +1245,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             else -> "ein Bild"
         }
         val a = ask(
-            "Du schreibst Prompts für einen Anime-Bildgenerator im Danbooru-Tag-Stil. Du antwortest nur mit einer Komma-Liste englischer Tags.",
-            "Beschreibung: ${description.trim()}\n\nSchreibe 6 bis 15 englische Danbooru-Tags für $what. Nur die Tags.", 0.4,
+            "Du beschreibst Bilder für einen Bildgenerator. Du antwortest nur mit einer Komma-Liste kurzer englischer Wortgruppen.",
+            "Beschreibung: ${description.trim()}\n\nSchreibe 6 bis 15 kurze englische Wortgruppen (z. B. \"long wavy red hair\", \"freckles\") für $what. Nur die Liste.", 0.4,
         )
         return cleanTags(a, field)
     }
@@ -1220,7 +1270,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             Schlage 4 Figuren vor, die die Geschichte tragen. Für jede ein Objekt:
             {"name": "…", "emoji": "ein Emoji", "rolle": "Hauptfigur|Nebenfigur|Gegenspieler", "geschlecht": "männlich|weiblich|divers",
              "beschreibung": "3–4 Sätze auf Deutsch: Persönlichkeit, Hintergrund, Ziel, Sprechweise",
-             "aussehen": "8–12 englische Danbooru-Tags zum Aussehen ohne Kleidung, z. B. long hair, red hair, green eyes"}
+             "aussehen": "8–12 kurze englische Wortgruppen zum Aussehen ohne Kleidung, z. B. long wavy red hair, green eyes, freckles"}
             Gib nur das JSON-Array zurück.
             """.trimIndent(), 0.9,
         )
@@ -1249,7 +1299,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             ${if (known.isNotBlank()) "Schon vorhanden (nicht wiederholen): $known" else ""}
 
             Schlage 4 Schauplätze vor. Für jeden ein Objekt:
-            {"name": "…", "beschreibung": "2–3 Sätze auf Deutsch: wie es dort aussieht, riecht, klingt", "tags": "6–10 englische Danbooru-Tags für den Hintergrund"}
+            {"name": "…", "beschreibung": "2–3 Sätze auf Deutsch: wie es dort aussieht, riecht, klingt", "tags": "6–10 kurze englische Wortgruppen für den Hintergrund"}
             Gib nur das JSON-Array zurück.
             """.trimIndent(), 0.9,
         )
@@ -1295,7 +1345,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val pic = img?.let { runCatching { repo.saveFundusImage("kleidung", it.readBytes()) }.getOrNull() }.orEmpty()
             f = f.copy(clothing = f.clothing + o.copy(preview = pic)); count++
         }
-        styles.forEach { st -> if (f.styles.none { it.lora == st.lora }) { f = f.copy(styles = f.styles + st); count++ } }
+        // Alte LoRA-Stile aus Character Fun passen nicht zu MOSS – nur Stile in Worten übernehmen
+        styles.filter { it.lora.isBlank() && it.prompt.isNotBlank() }
+            .forEach { st -> if (f.styles.none { it.id == st.id || it.prompt == st.prompt }) { f = f.copy(styles = f.styles + st); count++ } }
         if (!quiet && def.isNotBlank() && f.styles.any { it.id == def }) f = f.copy(defaultStyleId = def)
         updateFundus(f)
         return count

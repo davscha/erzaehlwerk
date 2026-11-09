@@ -16,3 +16,6 @@ Android-App fürs Tablet: Die KI schreibt Romane, du gibst die Richtung vor – 
 - [ ] Ton/Sprache aus Videos (später, z. B. Spracherkennung auf dem PC)
 - [x] Eigene Genres: Bereich „🏷️ Genres“ mit Beschreibung für die KI, Standard-Schreibstil und Bildstil, „➕ Eigenes …“ im Dialog
 - [x] Eigene Schreibstile mit Beschreibung für die KI („➕ Eigener …“), verwaltet unter „Genres & Stile“
+- [x] **MOSS Image** statt NoobAI: Workflow RealisticFreedom + 4-Step-LoRA, Qwen359B, Flux2-VAE; Bildstile in Worten (Disney, Anime, Comic, Aquarell, Foto); Megapixel einstellbar
+- [x] Szenenbilder mit mehreren Figuren („👥 alle“), KI beschreibt den Moment in Sätzen; Titelbild mit Titel-Schriftzug
+- [x] **Kapitel als Comicseite** (4/6/8/9 Panels in einem Bild, deutsche Bildunterschriften), auch im PDF/EPUB

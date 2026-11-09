@@ -43,13 +43,16 @@ data class Chapter(
     val title: String = "",
     val summary: String = "",
     val scenes: List<Scene> = emptyList(),
+    /** Das Kapitel als Comicseite (Bilddatei) */
+    val comic: String = "",
 ) {
-    fun toJson(): JSONObject = JSONObject().put("id", id).put("titel", title).put("inhalt", summary).put("szenen", JSONArray(scenes.map { it.toJson() }))
+    fun toJson(): JSONObject = JSONObject().put("id", id).put("titel", title).put("inhalt", summary).put("szenen", JSONArray(scenes.map { it.toJson() })).put("comic", comic)
 
     companion object {
         fun fromJson(o: JSONObject) = Chapter(
             o.optString("id").ifEmpty { UUID.randomUUID().toString() }, o.optString("titel"), o.optString("inhalt"),
             o.optJSONArray("szenen")?.let { a -> List(a.length()) { Scene.fromJson(a.getJSONObject(it)) } }.orEmpty(),
+            o.optString("comic"),
         )
     }
 }

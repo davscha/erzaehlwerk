@@ -84,7 +84,7 @@ fun FundusScreen(vm: AppViewModel) {
                 Card(onClick = { editStyle = s }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                     Column(Modifier.padding(14.dp)) {
                         Text((if (vm.fundus.defaultStyle?.id == s.id) "⭐ " else "🎨 ") + s.name.ifBlank { s.trigger }, fontWeight = FontWeight.SemiBold)
-                        Text("Trigger: ${s.trigger} · Stärke %.2f".format(s.strength), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(s.prompt, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3)
                     }
                 }
             }
@@ -126,7 +126,6 @@ private fun OutfitDialog(vm: AppViewModel, original: Outfit, onClose: () -> Unit
 private fun StyleDialog(vm: AppViewModel, original: Style, onClose: () -> Unit) {
     var s by remember { mutableStateOf(original) }
     var makeDefault by remember { mutableStateOf(vm.fundus.defaultStyle?.id == original.id) }
-    var menu by remember { mutableStateOf(false) }
     val isNew = vm.fundus.styles.none { it.id == original.id }
     AlertDialog(
         onDismissRequest = onClose,
@@ -134,29 +133,22 @@ private fun StyleDialog(vm: AppViewModel, original: Style, onClose: () -> Unit) 
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(value = s.name, onValueChange = { s = s.copy(name = it) }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Box {
-                    OutlinedTextField(
-                        value = s.lora,
-                        onValueChange = { s = s.copy(lora = it) },
-                        label = { Text("LoRA-Datei") },
-                        singleLine = true,
-                        trailingIcon = { TextButton(onClick = { if (vm.loras.isEmpty()) vm.loadLoras() else menu = true }) { Text(if (vm.loras.isEmpty()) "Liste laden" else "Auswählen") } },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        vm.loras.forEach { l -> DropdownMenuItem(text = { Text(l, fontSize = 14.sp) }, onClick = { menu = false; s = s.copy(lora = l, name = s.name.ifBlank { Style(lora = l).trigger }) }) }
-                    }
-                }
-                if (s.lora.isNotBlank()) Text("Trigger-Tag (automatisch): ${s.trigger}", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Stärke: %.2f".format(s.strength), fontSize = 13.sp)
-                Slider(value = s.strength, onValueChange = { s = s.copy(strength = (it * 20).toInt() / 20f) }, valueRange = 0f..1.5f)
+                OutlinedTextField(
+                    value = s.prompt,
+                    onValueChange = { s = s.copy(prompt = it) },
+                    label = { Text("Stil in Worten (Englisch)") },
+                    placeholder = { Text("classic Disney animation style, soft colors") },
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("Steht vorne in jedem Bild-Prompt. MOSS Image versteht ganze Sätze und Wortgruppen.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = makeDefault, onCheckedChange = { makeDefault = it })
                     Text("Standard-Stil")
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { vm.saveStyle(s.copy(name = s.name.ifBlank { s.trigger }), makeDefault); onClose() }, enabled = s.lora.isNotBlank()) { Text("Speichern") } },
+        confirmButton = { TextButton(onClick = { vm.saveStyle(s.copy(name = s.name.ifBlank { s.prompt.take(30) }), makeDefault); onClose() }, enabled = s.prompt.isNotBlank()) { Text("Speichern") } },
         dismissButton = {
             Row {
                 if (!isNew && vm.fundus.styles.size > 1) TextButton(onClick = { vm.deleteStyle(s.id); onClose() }) { Text("Löschen", color = MaterialTheme.colorScheme.error) }

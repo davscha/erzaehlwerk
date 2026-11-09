@@ -44,27 +44,17 @@ class ComfyClient(private val host: String, private val port: Int) {
         listOf("ComfyUI $version".trim(), gpu).filter { it.isNotBlank() }.joinToString(" · ")
     }
 
-    /** Alle LoRAs, die ComfyUI kennt */
-    suspend fun loras(): List<String> = withContext(Dispatchers.IO) {
-        val o = JSONObject(get("/object_info/LoraLoaderModelOnly"))
-        val arr = o.optJSONObject("LoraLoaderModelOnly")?.optJSONObject("input")?.optJSONObject("required")
-            ?.optJSONArray("lora_name")?.optJSONArray(0) ?: JSONArray()
-        List(arr.length()) { arr.optString(it) }.sorted()
-    }
-
     /** Erzeugt ein Bild und gibt die PNG-Bytes zurück. [onProgress] meldet die Wartezeit in Sekunden. */
     suspend fun generate(
         template: String,
         positive: String,
         negative: String,
         seed: Long,
-        lora: String?,
-        loraStrength: Float,
-        width: Int? = null,
-        height: Int? = null,
+        aspect: String = "4:3 (Standard)",
+        megapixels: Float = 2f,
         onProgress: (Int) -> Unit = {},
     ): ByteArray = withContext(Dispatchers.IO) {
-        val wf = prepare(JSONObject(template), positive, negative, seed, lora, loraStrength, width, height)
+        val wf = prepare(JSONObject(template), positive, negative, seed, aspect, megapixels)
         val body = JSONObject().put("prompt", wf).put("client_id", UUID.randomUUID().toString()).toString()
         val c = open("/prompt", 15000).apply {
             requestMethod = "POST"
@@ -84,7 +74,7 @@ class ComfyClient(private val host: String, private val port: Int) {
             delay(1000)
             val secs = ((System.currentTimeMillis() - start) / 1000).toInt()
             onProgress(secs)
-            if (secs > 300) throw IOException("ComfyUI braucht zu lange")
+            if (secs > 600) throw IOException("ComfyUI braucht zu lange")
             val hist = JSONObject(get("/history/$id"))
             val entry = hist.optJSONObject(id) ?: continue
             entry.optJSONObject("status")?.let { st ->
@@ -116,11 +106,8 @@ class ComfyClient(private val host: String, private val port: Int) {
     }.getOrDefault(answer.take(300))
 
     companion object {
-        /** Setzt Prompts, Startwert, LoRA und Größe in die Workflow-Vorlage ein. */
-        fun prepare(
-            wf: JSONObject, positive: String, negative: String, seed: Long,
-            lora: String?, loraStrength: Float, width: Int?, height: Int?,
-        ): JSONObject {
+        /** Setzt Prompt, Startwert, Seitenverhältnis und Megapixel in die Workflow-Vorlage ein. */
+        fun prepare(wf: JSONObject, positive: String, negative: String, seed: Long, aspect: String, megapixels: Float): JSONObject {
             val sampler = wf.keys().asSequence().map { it to wf.getJSONObject(it) }
                 .firstOrNull { (_, n) -> n.optString("class_type").startsWith("KSampler") }?.second
                 ?: throw IllegalArgumentException("Im Workflow fehlt ein KSampler")
@@ -130,43 +117,43 @@ class ComfyClient(private val host: String, private val port: Int) {
             fun setText(link: String, text: String) {
                 val ref = inputs.optJSONArray(link) ?: return
                 val node = wf.optJSONObject(ref.optString(0)) ?: return
+                // Nur echte Text-Knoten (bei MOSS ist der Negativ-Prompt ein ConditioningZeroOut)
+                if (node.optString("class_type") != "CLIPTextEncode") return
                 node.getJSONObject("inputs").put("text", text)
             }
             setText("positive", positive)
             setText("negative", negative)
             for (key in wf.keys()) {
                 val n = wf.getJSONObject(key)
-                val inp = n.optJSONObject("inputs") ?: continue
-                when (n.optString("class_type")) {
-                    "LoraLoaderModelOnly", "LoraLoader" -> if (!lora.isNullOrBlank()) {
-                        inp.put("lora_name", lora)
-                        inp.put("strength_model", loraStrength.toDouble())
-                        if (inp.has("strength_clip")) inp.put("strength_clip", loraStrength.toDouble())
-                    } else {
-                        inp.put("strength_model", 0.0)
-                        if (inp.has("strength_clip")) inp.put("strength_clip", 0.0)
-                    }
-                    "EmptyLatentImage", "EmptySD3LatentImage" -> {
-                        width?.let { inp.put("width", it) }
-                        height?.let { inp.put("height", it) }
-                    }
+                if (n.optString("class_type") == "ResolutionSelector") {
+                    n.getJSONObject("inputs").put("aspect_ratio", aspect).put("megapixels", megapixels.toDouble())
                 }
             }
             return wf
         }
 
-        /** Davids Workflow als eingebaute Vorlage (SDXL + PandorasBoxStyle, 12 Schritte, 1024×1024) */
+        /** Seitenverhältnisse des ResolutionSelector */
+        const val SQUARE = "1:1 (Square)"
+        const val PORTRAIT = "3:4 (Portrait Standard)"
+        const val LANDSCAPE = "4:3 (Standard)"
+        const val WIDE = "16:9 (Widescreen)"
+
+        /** Davids MOSS-Image-Workflow (RealisticFreedom + 4-Step-LoRA, Qwen-Textencoder, Flux2-VAE, 6 Schritte, CFG 1) */
         val DEFAULT_WORKFLOW = """
         {
-          "1": {"inputs": {"ckpt_name": "yiffymix_v64Noobxl.safetensors"}, "class_type": "CheckpointLoaderSimple"},
-          "2": {"inputs": {"text": "", "clip": ["1", 1]}, "class_type": "CLIPTextEncode"},
-          "3": {"inputs": {"text": "", "clip": ["1", 1]}, "class_type": "CLIPTextEncode"},
-          "4": {"inputs": {"seed": 1, "steps": 12, "cfg": 4, "sampler_name": "euler", "scheduler": "simple", "denoise": 1,
-                "model": ["7", 0], "positive": ["2", 0], "negative": ["3", 0], "latent_image": ["8", 0]}, "class_type": "KSampler"},
-          "5": {"inputs": {"samples": ["4", 0], "vae": ["1", 2]}, "class_type": "VAEDecode"},
-          "6": {"inputs": {"filename_prefix": "CharacterFun", "images": ["5", 0]}, "class_type": "SaveImage"},
-          "7": {"inputs": {"lora_name": "NoobAi\\PandorasBoxStyle.safetensors", "strength_model": 1, "model": ["1", 0]}, "class_type": "LoraLoaderModelOnly"},
-          "8": {"inputs": {"width": 1024, "height": 1024, "batch_size": 1}, "class_type": "EmptyLatentImage"}
+          "20": {"inputs": {"unet_name": "RealisticFreedom.safetensors", "weight_dtype": "default"}, "class_type": "UNETLoader"},
+          "36": {"inputs": {"lora_name": "moss_image_sft_4step_v2.0.safetensors", "strength_model": 1, "model": ["20", 0]}, "class_type": "LoraLoaderModelOnly"},
+          "24": {"inputs": {"double_layers": "", "single_layers": "22", "start_percent": 0, "end_percent": 0.5, "model": ["36", 0]}, "class_type": "SkipLayerGuidanceDiTSimple"},
+          "13": {"inputs": {"clip_name": "Qwen359B.safetensors", "type": "moss_image", "device": "default"}, "class_type": "CLIPLoader"},
+          "45": {"inputs": {"text": "", "clip": ["13", 0]}, "class_type": "CLIPTextEncode"},
+          "42": {"inputs": {"conditioning": ["45", 0]}, "class_type": "ConditioningZeroOut"},
+          "22": {"inputs": {"aspect_ratio": "4:3 (Standard)", "megapixels": 2, "multiple": 16}, "class_type": "ResolutionSelector"},
+          "6": {"inputs": {"width": ["22", 0], "height": ["22", 1], "batch_size": 1}, "class_type": "EmptyLatentImage"},
+          "2": {"inputs": {"seed": 1, "steps": 6, "cfg": 1, "sampler_name": "er_sde", "scheduler": "simple", "denoise": 1,
+                "model": ["24", 0], "positive": ["45", 0], "negative": ["42", 0], "latent_image": ["6", 0]}, "class_type": "KSampler"},
+          "8": {"inputs": {"vae_name": "Flux2.safetensors"}, "class_type": "VAELoader"},
+          "7": {"inputs": {"samples": ["2", 0], "vae": ["8", 0]}, "class_type": "VAEDecode"},
+          "9": {"inputs": {"filename_prefix": "Erzaehlwerk", "images": ["7", 0]}, "class_type": "SaveImage"}
         }
         """.trimIndent()
     }

@@ -137,7 +137,19 @@ class BookRepository(private val context: Context) {
 
     fun loadFundus(): Fundus {
         if (!fundusFile.exists()) return Fundus.starter.also { saveFundus(it) }
-        return runCatching { Fundus.fromJson(JSONObject(fundusFile.readText())) }.getOrElse { Fundus.starter }
+        val f = runCatching { Fundus.fromJson(JSONObject(fundusFile.readText())) }.getOrElse { Fundus.starter }
+        // Umstieg auf MOSS Image: Stile in Worten einmalig nachliefern, Disney wird Standard statt der alten LoRA
+        val known = f.styles.map { it.id }.toSet()
+        if (Fundus.mossStyles.none { it.id in known }) {
+            val old = f.defaultStyle
+            val moved = f.copy(
+                styles = Fundus.mossStyles + f.styles,
+                defaultStyleId = if (old == null || old.lora.isNotBlank()) Fundus.mossStyles.first().id else f.defaultStyleId,
+            )
+            saveFundus(moved)
+            return moved
+        }
+        return f
     }
 
     fun saveFundus(f: Fundus) {

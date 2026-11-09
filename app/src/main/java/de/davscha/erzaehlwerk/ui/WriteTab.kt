@@ -135,6 +135,7 @@ fun WriteTab(vm: AppViewModel, book: Book) {
 
             // ---- Szenenbild ----
             SceneImageBlock(vm, chapter.id, scene)
+            ComicBlock(vm, book, chapter)
 
             // ---- Text ----
             OutlinedTextField(
@@ -210,7 +211,7 @@ private fun RewriteDialog(onClose: () -> Unit, onGo: (String) -> Unit) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SceneImageBlock(vm: AppViewModel, chapterId: String, scene: de.davscha.erzaehlwerk.data.Scene) {
-    var focusId by remember(scene.id) { mutableStateOf(vm.defaultFocus(scene)?.id) }
+    var focusId by remember(scene.id) { mutableStateOf(if (scene.peopleIds.size > 1) ALL else vm.defaultFocus(scene)?.id) }
     var full by remember { mutableStateOf(false) }
     val file = vm.image(scene.image)
     val busy = vm.painting.containsKey(scene.id)
@@ -224,6 +225,7 @@ private fun SceneImageBlock(vm: AppViewModel, chapterId: String, scene: de.davsc
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("📷 Im Bild:", fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
         FilterChip(selected = focusId == null, onClick = { focusId = null }, label = { Text("niemand") })
+        if (scene.peopleIds.size > 1) FilterChip(selected = focusId == ALL, onClick = { focusId = ALL }, label = { Text("👥 alle") })
         scene.peopleIds.mapNotNull { vm.person(it) }.forEach { p ->
             FilterChip(selected = focusId == p.id, onClick = { focusId = p.id }, label = { Text("${p.emoji} ${p.name}") })
         }
@@ -244,4 +246,33 @@ fun FullImage(file: java.io.File, onClose: () -> Unit) {
             coil.compose.AsyncImage(model = file, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(16.dp))
         }
     }
+}
+
+/** Das ganze Kapitel als Comicseite – MOSS malt alle Panels in einem Bild */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ComicBlock(vm: AppViewModel, book: Book, chapter: de.davscha.erzaehlwerk.data.Chapter) {
+    var panels by remember { mutableStateOf(6) }
+    var full by remember { mutableStateOf(false) }
+    val id = "comic-${chapter.id}"
+    val file = vm.image(chapter.comic)
+    val busy = vm.painting.containsKey(id)
+    if (full && file != null) FullImage(file) { full = false }
+    HorizontalDivider(Modifier.padding(vertical = 6.dp))
+    Text("💬 Kapitel als Comicseite: ${chapter.title}", fontWeight = FontWeight.SemiBold)
+    if (file != null || busy) {
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            PreviewImage(file, "💬", vm.painting[id],
+                Modifier.size(width = 330.dp, height = 440.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).clickable(enabled = file != null) { full = true })
+        }
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Panels:", fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
+        listOf(4, 6, 8, 9).forEach { n -> FilterChip(selected = panels == n, onClick = { panels = n }, label = { Text("$n") }) }
+        OutlinedButton(onClick = { vm.paintComic(book, chapter.id, panels) }, enabled = vm.comfyReady && !busy && chapter.scenes.isNotEmpty()) {
+            Text(if (file == null) "Comicseite malen" else "Neu malen")
+        }
+        if (file != null) TextButton(onClick = { vm.removeComic(chapter.id) }) { Text("Entfernen") }
+    }
+    vm.paintError[id]?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.error) }
 }
