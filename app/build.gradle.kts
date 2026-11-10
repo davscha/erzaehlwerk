@@ -33,11 +33,31 @@ android {
         debug { signingConfig = signingConfigs.getByName("debug") }
     }
 
+    // Zwei kostenlose Versionen aus demselben Code:
+    // Pro = mit Ollama und ComfyUI auf dem PC, Lite = alles nur auf dem Gerät
+    flavorDimensions += "edition"
+    productFlavors {
+        create("pro") {
+            dimension = "edition"
+            buildConfigField("boolean", "PRO", "true")
+            manifestPlaceholders["appLabel"] = "Erzählwerk Pro"
+        }
+        create("lite") {
+            dimension = "edition"
+            applicationIdSuffix = ".lite"
+            buildConfigField("boolean", "PRO", "false")
+            manifestPlaceholders["appLabel"] = "Erzählwerk Lite"
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 
     packaging {
         jniLibs {

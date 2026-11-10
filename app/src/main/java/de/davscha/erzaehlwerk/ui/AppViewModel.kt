@@ -1,5 +1,7 @@
 package de.davscha.erzaehlwerk.ui
 
+import de.davscha.erzaehlwerk.Edition
+
 import android.app.Application
 import android.content.Context
 import android.os.Environment
@@ -214,7 +216,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val ollamaEngine: ChatEngine = OllamaEngine { ollamaHost to ollamaPort }
 
     /** Ollama bevorzugen (wenn eingeschaltet) – ist der PC nicht erreichbar, springt Gemma auf dem Tablet ein */
-    var preferOllama by mutableStateOf(prefs.getBoolean("ollama_bevorzugen", false))
+    var preferOllama by mutableStateOf(Edition.PRO && prefs.getBoolean("ollama_bevorzugen", false))
         private set
     var ollamaHost by mutableStateOf(prefs.getString("ollama_host", "") ?: "")
         private set
@@ -271,7 +273,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun testOllama() {
-        if (ollamaHost.isBlank() || ollamaStatus is PcStatus.Testing) return
+        if (Edition.LITE || ollamaHost.isBlank() || ollamaStatus is PcStatus.Testing) return
         ollamaStatus = PcStatus.Testing
         viewModelScope.launch {
             ollamaStatus = try {
@@ -391,7 +393,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var comfyStatus by mutableStateOf<PcStatus>(PcStatus.Untested)
         private set
-    val comfyReady get() = comfyHost.isNotBlank() && comfyStatus is PcStatus.Ok
+    val comfyReady get() = Edition.PRO && comfyHost.isNotBlank() && comfyStatus is PcStatus.Ok
 
     fun changeComfyHost(h: String) {
         comfyHost = h.trim()
@@ -406,7 +408,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun testComfy() {
-        if (comfyHost.isBlank() || comfyStatus is PcStatus.Testing) return
+        if (Edition.LITE || comfyHost.isBlank() || comfyStatus is PcStatus.Testing) return
         comfyStatus = PcStatus.Testing
         viewModelScope.launch {
             comfyStatus = try {
@@ -1108,6 +1110,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun stopPaintAll() { paintAllJob?.cancel() }
 
     fun coverImage(b: Book) = repo.image(b.id, b.cover)
+
+    /** Eigenes Bild aus der Galerie als Titelbild */
+    fun coverFromGallery(b: Book, uri: android.net.Uri) {
+        viewModelScope.launch {
+            val name = withContext(Dispatchers.IO) { repo.importImage(b.id, uri) } ?: return@launch
+            saveBook((book(b.id) ?: b).copy(cover = name))
+        }
+    }
 
     /** Titelbild: Hauptfigur (falls vorhanden) in einem Moment, der zur Geschichte passt */
     fun paintCover(book: Book) {

@@ -24,15 +24,19 @@ jobs:
           gradle-version: "8.11.1"
 
       - name: APK bauen
-        run: gradle assembleDebug --stacktrace
+        run: gradle assembleProDebug assembleLiteDebug --stacktrace
 
       - name: APK umbenennen
-        run: cp app/build/outputs/apk/debug/app-debug.apk Erzaehlwerk.apk
+        run: |
+          cp app/build/outputs/apk/pro/debug/app-pro-debug.apk Erzaehlwerk.apk
+          cp app/build/outputs/apk/lite/debug/app-lite-debug.apk Erzaehlwerk-Lite.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: Erzaehlwerk
-          path: Erzaehlwerk.apk
+          path: |
+            Erzaehlwerk.apk
+            Erzaehlwerk-Lite.apk
 
       # Immer der neueste Build unter "Releases → latest", direkt vom Tablet ladbar
       - name: Release aktualisieren
@@ -40,7 +44,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest Erzaehlwerk.apk \
+          gh release create latest Erzaehlwerk.apk Erzaehlwerk-Lite.apk \
             --title "Erzählwerk – Build ${{ github.run_number }}" \
             --notes "Automatisch gebaut aus ${{ github.sha }}" \
             --target ${{ github.sha }}

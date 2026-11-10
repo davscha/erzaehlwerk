@@ -1,5 +1,7 @@
 package de.davscha.erzaehlwerk.ui
 
+import de.davscha.erzaehlwerk.Edition
+
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -136,6 +138,7 @@ private fun PersonDialog(vm: AppViewModel, original: Person, onClose: () -> Unit
                     minLines = 3,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (Edition.PRO) {
                 TagInput(
                     value = p.appearance,
                     onChange = { p = p.copy(appearance = it) },
@@ -173,6 +176,7 @@ private fun PersonDialog(vm: AppViewModel, original: Person, onClose: () -> Unit
                         modifier = Modifier.width(150.dp),
                     )
                     IconButton(onClick = { p = p.copy(seed = (1..999_999_999L).random()) }) { Icon(Icons.Default.Casino, "Würfeln") }
+                }
                 }
                 PaintBox(vm, p.id, vm.image(preview), p.emoji, p.appearance.isNotBlank() && p.name.isNotBlank()) { vm.paintPerson(p.copy(preview = preview)) }
             }
@@ -251,6 +255,7 @@ private fun PlaceDialog(vm: AppViewModel, original: Place, onClose: () -> Unit) 
                     minLines = 3,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (Edition.PRO) {
                 TagInput(value = pl.tags, onChange = { pl = pl.copy(tags = it) }, label = "Bild-Tags", field = TagField.LOCATION, placeholder = "castle, night, moonlight, fog") {
                     IconButton(onClick = {
                         helping = true
@@ -263,6 +268,7 @@ private fun PlaceDialog(vm: AppViewModel, original: Place, onClose: () -> Unit) 
                     }, enabled = !helping && (pl.description.isNotBlank() || pl.name.isNotBlank())) {
                         if (helping) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Icon(Icons.Default.AutoFixHigh, "Aus der Beschreibung")
                     }
+                }
                 }
                 PaintBox(vm, pl.id, vm.image(preview), "🏞️", pl.tags.isNotBlank()) { vm.paintPlace(pl.copy(preview = preview)) }
             }

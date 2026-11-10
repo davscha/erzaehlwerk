@@ -19,3 +19,4 @@ Android-App fürs Tablet: Die KI schreibt Romane, du gibst die Richtung vor – 
 - [x] **MOSS Image** statt NoobAI: Workflow RealisticFreedom + 4-Step-LoRA, Qwen359B, Flux2-VAE; Bildstile in Worten (Disney, Anime, Comic, Aquarell, Foto); Megapixel einstellbar
 - [x] Szenenbilder mit mehreren Figuren („👥 alle“), KI beschreibt den Moment in Sätzen; Titelbild mit Titel-Schriftzug
 - [x] **Kapitel als Comicseite** (4/6/8/9 Panels in einem Bild, deutsche Bildunterschriften), auch im PDF/EPUB
+- [x] Zwei kostenlose Versionen: Pro (Ollama + ComfyUI) und Lite (nur auf dem Gerät), Titelbild aus der Galerie

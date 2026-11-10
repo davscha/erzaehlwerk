@@ -1,5 +1,7 @@
 package de.davscha.erzaehlwerk.ui
 
+import de.davscha.erzaehlwerk.Edition
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,6 +67,11 @@ fun ItemCard(file: File?, emoji: String, title: String, subtitle: String, painti
 /** Vorschau im Dialog mit „Vorschau malen“ */
 @Composable
 fun PaintBox(vm: AppViewModel, id: String, file: File?, emoji: String, canPaint: Boolean, onPaint: () -> Unit) {
+    if (Edition.LITE) {
+        // Lite malt nicht – ein Bild aus der Pro-Version wird trotzdem gezeigt
+        if (file != null) PreviewImage(file, emoji, null, Modifier.size(200.dp).clip(RoundedCornerShape(12.dp)))
+        return
+    }
     Row(verticalAlignment = Alignment.Top) {
         PreviewImage(file, emoji, vm.painting[id], Modifier.size(200.dp).clip(RoundedCornerShape(12.dp)))
         Spacer(Modifier.width(12.dp))

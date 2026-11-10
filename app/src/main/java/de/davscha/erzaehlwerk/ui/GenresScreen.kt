@@ -1,5 +1,7 @@
 package de.davscha.erzaehlwerk.ui
 
+import de.davscha.erzaehlwerk.Edition
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -175,8 +177,8 @@ fun GenreDialog(vm: AppViewModel, start: Genre, onSaved: (Genre) -> Unit = {}, o
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Book.tenses.forEach { t -> FilterChip(selected = g.tense == t, onClick = { g = g.copy(tense = if (g.tense == t) "" else t) }, label = { Text(t) }) }
                 }
-                Text("Bildstil", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (Edition.PRO) Text("Bildstil", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (Edition.PRO) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     FilterChip(selected = g.imageStyleId.isBlank(), onClick = { g = g.copy(imageStyleId = "") }, label = { Text("Standard") })
                     vm.fundus.styles.forEach { s -> FilterChip(selected = g.imageStyleId == s.id, onClick = { g = g.copy(imageStyleId = s.id) }, label = { Text("🎨 ${s.name}") }) }
                 }

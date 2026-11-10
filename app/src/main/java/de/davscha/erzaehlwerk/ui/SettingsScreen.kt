@@ -1,5 +1,7 @@
 package de.davscha.erzaehlwerk.ui
 
+import de.davscha.erzaehlwerk.Edition
+
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
@@ -73,9 +75,10 @@ fun SettingsScreen(vm: AppViewModel) {
                 }
 
                 Section("KI auf dem Tablet (Gemma)")
-                Text("Springt automatisch ein, wenn der PC nicht erreichbar ist.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (Edition.PRO) "Springt automatisch ein, wenn der PC nicht erreichbar ist." else "Alles läuft direkt auf dem Gerät. Das Modell wird einmal heruntergeladen, danach geht es auch offline.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 ModelCatalog.all.forEach { ModelRow(vm, it) }
 
+                if (Edition.PRO) {
                 Section("KI auf dem PC (Ollama)")
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Ollama bevorzugen", modifier = Modifier.weight(1f))
@@ -117,6 +120,8 @@ fun SettingsScreen(vm: AppViewModel) {
                         Spacer(Modifier.width(12.dp))
                         Text(msg, fontSize = 13.sp, color = MaterialTheme.colorScheme.secondary)
                     }
+                }
+
                 }
 
                 Section("KI testen")

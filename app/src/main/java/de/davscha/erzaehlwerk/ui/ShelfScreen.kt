@@ -1,5 +1,7 @@
 package de.davscha.erzaehlwerk.ui
 
+import de.davscha.erzaehlwerk.Edition
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -80,7 +82,7 @@ fun ShelfScreen(vm: AppViewModel) {
                     Spacer(Modifier.width(6.dp))
                     Text("Genres & Stile")
                 }
-                TextButton(onClick = { vm.navigate(Screen.FundusPage) }) {
+                if (Edition.PRO) TextButton(onClick = { vm.navigate(Screen.FundusPage) }) {
                     Text("🎭")
                     Spacer(Modifier.width(6.dp))
                     Text("Fundus")

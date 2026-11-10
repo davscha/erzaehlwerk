@@ -1,5 +1,7 @@
 package de.davscha.erzaehlwerk.ui
 
+import de.davscha.erzaehlwerk.Edition
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.draw.clip
@@ -126,7 +128,7 @@ fun WriteTab(vm: AppViewModel, book: Book) {
                 }
                 if (!writing && all.any { it.third.text.isBlank() }) OutlinedButton(onClick = { confirmAll = true }) { Text("📚 Alle leeren Szenen schreiben") }
                 if (vm.paintAllStatus != null) FilledTonalButton(onClick = { vm.stopPaintAll() }) { Text("Bilder stoppen (${vm.paintAllStatus})") }
-                else if (!writing && all.any { it.third.image.isBlank() && it.third.text.isNotBlank() }) OutlinedButton(onClick = { vm.paintAllScenes() }, enabled = vm.comfyReady) { Text("🖼️ Bilder für alle Szenen") }
+                else if (Edition.PRO && !writing && all.any { it.third.image.isBlank() && it.third.text.isNotBlank() }) OutlinedButton(onClick = { vm.paintAllScenes() }, enabled = vm.comfyReady) { Text("🖼️ Bilder für alle Szenen") }
             }
             vm.writeStatus?.let {
                 Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)); Text(it, fontSize = 13.sp) }
@@ -135,7 +137,7 @@ fun WriteTab(vm: AppViewModel, book: Book) {
 
             // ---- Szenenbild ----
             SceneImageBlock(vm, chapter.id, scene)
-            ComicBlock(vm, book, chapter)
+            if (Edition.PRO) ComicBlock(vm, book, chapter)
 
             // ---- Text ----
             OutlinedTextField(
@@ -221,6 +223,10 @@ private fun SceneImageBlock(vm: AppViewModel, chapterId: String, scene: de.davsc
             PreviewImage(file, "🖼️", vm.painting[scene.id],
                 Modifier.size(420.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).clickable(enabled = file != null) { full = true })
         }
+    }
+    if (Edition.LITE) {
+        if (file != null) TextButton(onClick = { vm.removeSceneImage(chapterId, scene.id) }) { Text("Bild entfernen") }
+        return
     }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("📷 Im Bild:", fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
