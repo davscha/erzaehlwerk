@@ -440,7 +440,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         extraNegative: String = "", aspect: String = ComfyClient.LANDSCAPE, onProgress: (Int) -> Unit = {},
     ): ByteArray {
         require(comfyHost.isNotBlank()) { "ComfyUI ist noch nicht eingerichtet (Einstellungen)." }
-        val positive = listOf(style?.prompt, basePositive, text).filter { !it.isNullOrBlank() }.joinToString(". ") { it!!.trim().trimEnd('.') }
+        // MOSS-JSON geht so raus, wie es ist (Stil steht schon drin); reiner Text bekommt den Stil davor
+        val positive = if (text.trimStart().startsWith("{")) text
+        else listOf(style?.prompt, basePositive, text).filter { !it.isNullOrBlank() }.joinToString(". ") { it!!.trim().trimEnd('.') }
         try {
             return ComfyClient(comfyHost, comfyPort).generate(
                 ComfyClient.DEFAULT_WORKFLOW, positive, ImagePrompt.join(baseNegative, extraNegative),
@@ -452,6 +454,56 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             throw e
         }
+    }
+
+    /** Der Stil-Eintrag fürs JSON: dein Stil plus „kommt in jeden Bild-Prompt“ */
+    fun styleText(st: Style?) = listOf(st?.prompt, basePositive).filter { !it.isNullOrBlank() }.joinToString(", ") { it!!.trim().trimEnd('.', ',') }
+
+    /** Kleidung, Figur oder Ort aus einer deutschen Beschreibung → englische Felder für MOSS */
+    private fun jsonObject(answer: String): org.json.JSONObject? {
+        val a = answer.indexOf('{'); val b = answer.lastIndexOf('}')
+        if (a < 0 || b <= a) return null
+        return runCatching { org.json.JSONObject(answer.substring(a, b + 1)) }.getOrNull()
+    }
+
+    suspend fun describeLooks(p: Person, text: String): Person {
+        val a = ask(
+            "You describe characters for an image generator. Answer only with a JSON object in English, no explanation, no markdown.",
+            "Figur: ${p.name} (${p.gender.label}). ${p.description}\nAussehen laut Autor: ${text.ifBlank { "(denk dir etwas Passendes aus)" }}\n\n" +
+                "Fill this JSON in English with short descriptive phrases (no clothing):\n" +
+                "{\"age\": 28, \"face\": \"angular face, high cheekbones, straight nose, full lips\", \"eyes\": \"almond-shaped green eyes, calm gaze\", " +
+                "\"body\": \"slender athletic build, average height\", \"skin\": \"fair skin, light freckles\", \"hair\": \"chin length wavy bob, dark brown\"}",
+            0.5,
+        )
+        val o = jsonObject(a) ?: throw IllegalStateException("Die KI hat nichts Brauchbares geliefert. Einfach nochmal versuchen.")
+        fun f(k: String, old: String) = o.optString(k).trim().ifBlank { old }
+        return p.copy(age = f("age", p.age), face = f("face", p.face), eyes = f("eyes", p.eyes), body = f("body", p.body), skin = f("skin", p.skin), hair = f("hair", p.hair))
+    }
+
+    suspend fun describePlace(pl: Place, text: String): Place {
+        val a = ask(
+            "You describe locations for an image generator. Answer only with a JSON object in English, no explanation, no markdown.",
+            "Ort: ${pl.name}. ${pl.description} ${text}\n\nFill this JSON in English (no people):\n" +
+                "{\"background\": \"vast abandoned warehouse hall, rusted steel staircase on the right, graffiti on the walls, cracked concrete floor\", " +
+                "\"lights\": \"sunbeams through the roof windows, hazy light shafts\"}",
+            0.5,
+        )
+        val o = jsonObject(a) ?: throw IllegalStateException("Die KI hat nichts Brauchbares geliefert. Einfach nochmal versuchen.")
+        return pl.copy(background = o.optString("background").trim().ifBlank { pl.background }, lights = o.optString("lights").trim().ifBlank { pl.lights })
+    }
+
+    suspend fun describeOutfit(o: Outfit, text: String): Outfit {
+        val a = ask(
+            "You describe clothing for an image generator. Answer only with a JSON object in English, no explanation, no markdown.",
+            "Kleidung „${o.name}“: ${text}\n\nOne key per piece (jacket, shirt, tshirt, pants, skirt, dress, shoes, boots, scarf, gloves, hat, bag …), " +
+                "each value with cut, length, how it is worn, color and material, e.g.:\n" +
+                "{\"jacket\": \"zip front field jacket with a stand collar, hip length, worn open, brown cotton\", \"pants\": \"slim fit jeans, ankle length, mid blue denim\", " +
+                "\"boots\": \"lace-up work boots with a thick sole, tan brown leather\"}",
+            0.5,
+        )
+        val j = jsonObject(a) ?: throw IllegalStateException("Die KI hat nichts Brauchbares geliefert. Einfach nochmal versuchen.")
+        val pieces = j.keys().asSequence().map { it to j.optString(it).trim() }.filter { it.second.isNotBlank() }.toList()
+        return if (pieces.isEmpty()) o else o.copy(pieces = pieces)
     }
 
     /** Ids, deren Bild gerade gemalt wird, und letzte Fehler */
@@ -508,7 +560,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun paintOutfit(o: Outfit) {
         saveOutfit(o)
         paintJob(o.id) { prog ->
-            val png = paint(ImagePrompt.outfit(o), aspect = ComfyClient.PORTRAIT, onProgress = prog)
+            val png = paint(ImagePrompt.outfit(styleText(fundus.defaultStyle), o), aspect = ComfyClient.PORTRAIT, onProgress = prog)
             val name = withContext(Dispatchers.IO) { repo.saveFundusImage("kleidung", png) }
             saveOutfit((outfit(o.id) ?: o).copy(preview = name))
         }
@@ -557,7 +609,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val bookId = worldBookId
         paintJob(p.id) { prog ->
             val seed = p.seed.takeIf { it > 0 } ?: (1..999_999_999L).random()
-            val png = paint(ImagePrompt.person(p, outfit(p.outfitId)), style = bookStyle(), seed = seed, aspect = ComfyClient.PORTRAIT, onProgress = prog)
+            val png = paint(ImagePrompt.person(styleText(bookStyle()), p, outfit(p.outfitId)), style = bookStyle(), seed = seed, aspect = ComfyClient.PORTRAIT, onProgress = prog)
             val name = withContext(Dispatchers.IO) { repo.saveImage(bookId, "figur", png) }
             if (worldBookId == bookId) savePerson((world.people.firstOrNull { it.id == p.id } ?: p).copy(preview = name))
         }
@@ -567,7 +619,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         savePlace(p)
         val bookId = worldBookId
         paintJob(p.id) { prog ->
-            val png = paint(ImagePrompt.place(p), style = bookStyle(), onProgress = prog)
+            val png = paint(ImagePrompt.place(styleText(bookStyle()), p), style = bookStyle(), onProgress = prog)
             val name = withContext(Dispatchers.IO) { repo.saveImage(bookId, "ort", png) }
             if (worldBookId == bookId) savePlace((world.places.firstOrNull { it.id == p.id } ?: p).copy(preview = name))
         }
@@ -920,7 +972,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (people.isNotEmpty()) {
             appendLine("Figuren in der Szene:")
             people.forEach { p ->
-                val look = p.appearance.takeIf { it.isNotBlank() }?.let { " Aussehen (Stichworte): $it." } ?: ""
+                val look = ImagePrompt.looks(p, null).takeIf { it.isNotBlank() && it != p.gender.word }?.let { " Aussehen (englische Stichworte): $it." } ?: ""
                 val outfit = outfit(p.outfitId)?.let { " Kleidung: ${it.name}." } ?: ""
                 appendLine("- ${p.name}${if (p.gender != Gender.UNKNOWN) " (${p.gender.label})" else ""}: ${p.description.take(if (short) 250 else 500)}$look$outfit")
             }
@@ -999,20 +1051,44 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Wie Figuren aussehen – für die KI, damit sie sie im Bild genau so beschreibt */
     private fun looksList(people: List<Person>) = people.joinToString("\n") { "- ${it.name}: ${ImagePrompt.looks(it, outfit(it.outfitId))}" }
 
-    /** Die KI beschreibt den Moment der Szene als englisches Bild (MOSS Image versteht ganze Sätze) */
-    private suspend fun sceneDescription(sc: Scene, people: List<Person>): String {
+    /** Regeln für die KI: pose = Haltung EINER Figur, action = Zusammenspiel mit anderen Figuren und der Welt */
+    private val momentRules =
+        "Regeln: \"pose\" beschreibt NUR die Körperhaltung dieser einen Figur (z. B. \"sitting on the floor, leaning back, hands on the floor, knees up\"), " +
+            "ohne andere Figuren oder Gegenstände zu nennen. \"face_expression\" ist ihr Gesichtsausdruck. " +
+            "\"action\" beschreibt, wie die Figuren miteinander und mit Gegenständen oder der Umgebung umgehen, mit ihren Namen " +
+            "(z. B. \"Angus stands behind Alice, his hands rest on her shoulders\"). " +
+            "\"camera\" ist Bildausschnitt und Blickwinkel (z. B. \"cowboy shot, dutch angle\"). Alles auf Englisch, kurze Wortgruppen."
+
+    /** Die KI wählt den Moment der Szene: Pose und Ausdruck je Figur, Handlung, Licht, Kamera → MOSS-JSON */
+    private suspend fun sceneJson(book: Book?, sc: Scene, people: List<Person>): String {
         val pl = place(sc.placeId)
         val a = ask(
-            "You write prompts for an image generator that understands natural English. You answer only with the image description, no explanation.",
+            "You plan images for an image generator. Answer only with a JSON object in English, no explanation, no markdown.",
             "Romanszene: ${sc.title} – ${sc.summary}\n${sc.text.take(2500)}\n\n" +
-                (if (people.isNotEmpty()) "Figuren im Bild und ihr Aussehen (genau so übernehmen, NICHT ihre Namen schreiben, " +
-                    "der Bildgenerator kennt keine Namen):\n${looksList(people)}\n\n" else "Keine Personen im Bild, nur Ort, Stimmung und Handlung.\n\n") +
-                (pl?.let { "Ort: ${it.name} – ${ImagePrompt.join(it.tags)}\n\n" } ?: "") +
-                "Wähle den eindrucksvollsten Moment der Szene und beschreibe ihn als ein Bild in 2 bis 4 englischen Sätzen: " +
-                "wer was tut, Posen, Gesichtsausdrücke, Blickrichtungen, Ort, Licht, Bildausschnitt.",
+                (if (people.isNotEmpty()) "Figuren im Bild: ${people.joinToString { it.name }}\n" else "Keine Personen im Bild, nur Ort, Gegenstände und Stimmung.\n") +
+                (pl?.let { "Ort: ${it.name} – ${it.background.ifBlank { it.description }}. Licht dort: ${it.lights.ifBlank { "frei" }}\n" } ?: "") +
+                "\nWähle den eindrucksvollsten Moment der Szene. $momentRules\n" +
+                "\"lights\" passt das Licht an den Moment an (Tageszeit, Wetter). " +
+                (if (pl == null) "\"background\" beschreibt den Ort, weil keiner festgelegt ist. " else "") +
+                "Form:\n{\"figures\": [${people.joinToString { "{\"name\": \"${it.name}\", \"pose\": \"…\", \"face_expression\": \"…\"}" }}], " +
+                "\"action\": \"…\", \"lights\": \"…\", ${if (pl == null) "\"background\": \"…\", " else ""}\"camera\": \"…\"}",
             0.5,
         )
-        return cleanDescription(a)
+        val o = jsonObject(a)
+        val moments = mutableMapOf<String, ImagePrompt.Moment>()
+        o?.optJSONArray("figures")?.let { arr ->
+            for (k in 0 until arr.length()) arr.optJSONObject(k)?.let { f ->
+                moments[f.optString("name").trim().lowercase()] = ImagePrompt.Moment(f.optString("pose"), f.optString("face_expression"))
+            }
+        }
+        val figures = people.map { p -> ImagePrompt.figure(p, outfit(p.outfitId), moments[p.name.trim().lowercase()] ?: ImagePrompt.Moment()) }
+        return ImagePrompt.build(
+            styleText(bookStyle()), figures,
+            action = o?.optString("action").orEmpty().ifBlank { if (o == null) cleanDescription(a) else "" },
+            background = pl?.background?.ifBlank { pl.tags }?.ifBlank { pl.description } ?: o?.optString("background").orEmpty(),
+            lights = o?.optString("lights").orEmpty().ifBlank { pl?.lights.orEmpty() },
+            camera = o?.optString("camera").orEmpty(),
+        )
     }
 
     /** Wer ist auf dem Szenenbild? Standard: alle Figuren der Szene (MOSS kann mehrere Figuren auseinanderhalten) */
@@ -1031,7 +1107,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun paintSceneNow(bookId: String, chapterId: String, sc: Scene, people: List<Person>, prog: (Int) -> Unit) {
-        val prompt = sceneDescription(sc, people)
+        val prompt = sceneJson(book(bookId), sc, people)
         // Eine Figur: deren fester Startwert, damit sie wiedererkennbar bleibt
         val seed = people.singleOrNull()?.seed?.takeIf { it > 0 } ?: (1..999_999_999L).random()
         val png = paint(prompt, style = bookStyle(), seed = seed, aspect = ComfyClient.LANDSCAPE, onProgress = prog)
@@ -1125,15 +1201,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         paintJob("cover-$bookId") { prog ->
             val hero = world.people.firstOrNull { it.role == Role.HAUPT } ?: world.people.firstOrNull()
             val a = ask(
-                "You write prompts for an image generator that understands natural English and can render readable text. You answer only with the prompt.",
+                "You plan images for an image generator. Answer only with a JSON object in English, no explanation, no markdown.",
                 "Roman: ${book.title}. ${genreLine(book)} ${plot.synopsis.ifBlank { book.idea }.take(1500)}\n\n" +
-                    (hero?.let { "Hauptfigur und ihr Aussehen (genau so übernehmen, kein Name): ${ImagePrompt.looks(it, outfit(it.outfitId))}\n\n" } ?: "") +
-                    "Beschreibe auf Englisch in 2 bis 4 Sätzen ein stimmungsvolles Buch-Titelbild: Motiv, Ort, Licht, Stimmung" +
-                    (hero?.let { ", Pose und Ausdruck der Hauptfigur" } ?: "") +
-                    ". Oben steht groß der Titel als Schriftzug: \"${book.title}\".",
+                    "Plane ein stimmungsvolles Buch-Titelbild${hero?.let { " mit der Hauptfigur ${it.name}" } ?: " ohne Personen"}. " +
+                    (if (hero != null) "$momentRules\n" else "") +
+                    "Form:\n{${hero?.let { "\"pose\": \"…\", \"face_expression\": \"…\", " } ?: ""}\"action\": \"…\", \"background\": \"…\", \"lights\": \"…\", \"camera\": \"…\"}",
                 0.7,
             )
-            val prompt = cleanDescription(a)
+            val o = jsonObject(a)
+            val figures = listOfNotNull(hero?.let { ImagePrompt.figure(it, outfit(it.outfitId), ImagePrompt.Moment(o?.optString("pose").orEmpty(), o?.optString("face_expression").orEmpty())) })
+            val prompt = ImagePrompt.build(
+                styleText(bookStyle()), figures,
+                action = o?.optString("action").orEmpty().ifBlank { if (o == null) cleanDescription(a) else "" },
+                background = o?.optString("background").orEmpty(), lights = o?.optString("lights").orEmpty(), camera = o?.optString("camera").orEmpty(),
+                extra = mapOf("text" to "the book title \"${book.title}\" in large letters at the top"),
+            )
             val png = paint(prompt, style = bookStyle(), seed = hero?.seed?.takeIf { it > 0 } ?: (1..999_999_999L).random(), aspect = ComfyClient.PORTRAIT, onProgress = prog)
             val name = withContext(Dispatchers.IO) { repo.saveImage(bookId, "titel", png) }
             book(bookId)?.let { saveBook(it.copy(cover = name)) }
@@ -1280,7 +1362,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             Schlage 4 Figuren vor, die die Geschichte tragen. Für jede ein Objekt:
             {"name": "…", "emoji": "ein Emoji", "rolle": "Hauptfigur|Nebenfigur|Gegenspieler", "geschlecht": "männlich|weiblich|divers",
              "beschreibung": "3–4 Sätze auf Deutsch: Persönlichkeit, Hintergrund, Ziel, Sprechweise",
-             "aussehen": "8–12 kurze englische Wortgruppen zum Aussehen ohne Kleidung, z. B. long wavy red hair, green eyes, freckles"}
+             "alter": 30, "gesicht": "englisch, z. B. angular face, high cheekbones", "augen": "englisch, z. B. almond-shaped green eyes",
+             "koerper": "englisch, z. B. slender athletic build", "haut": "englisch, z. B. fair skin, light freckles", "haare": "englisch, z. B. chin length wavy bob, dark brown"}
             Gib nur das JSON-Array zurück.
             """.trimIndent(), 0.9,
         )
@@ -1293,7 +1376,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 role = when { o.optString("rolle").startsWith("Haupt") -> Role.HAUPT; o.optString("rolle").startsWith("Gegen") -> Role.GEGEN; else -> Role.NEBEN },
                 gender = when (o.optString("geschlecht").lowercase().take(1)) { "m" -> Gender.MALE; "w" -> Gender.FEMALE; "d" -> Gender.DIVERSE; else -> Gender.UNKNOWN },
                 description = o.optString("beschreibung"),
-                appearance = cleanTags(o.optString("aussehen"), TagField.APPEARANCE),
+                age = o.optString("alter"), face = o.optString("gesicht"), eyes = o.optString("augen"),
+                body = o.optString("koerper"), skin = o.optString("haut"), hair = o.optString("haare"),
             )
         }
     }
@@ -1309,14 +1393,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             ${if (known.isNotBlank()) "Schon vorhanden (nicht wiederholen): $known" else ""}
 
             Schlage 4 Schauplätze vor. Für jeden ein Objekt:
-            {"name": "…", "beschreibung": "2–3 Sätze auf Deutsch: wie es dort aussieht, riecht, klingt", "tags": "6–10 kurze englische Wortgruppen für den Hintergrund"}
+            {"name": "…", "beschreibung": "2–3 Sätze auf Deutsch: wie es dort aussieht, riecht, klingt",
+             "hintergrund": "auf Englisch, was man sieht, z. B. vast abandoned warehouse hall, rusted steel staircase, cracked concrete floor",
+             "licht": "auf Englisch, z. B. sunbeams through broken roof windows, hazy light"}
             Gib nur das JSON-Array zurück.
             """.trimIndent(), 0.9,
         )
         val arr = jsonArray(a) ?: throw IllegalStateException("Die KI hat keine Orte geliefert. Einfach nochmal versuchen.")
         return List(arr.length()) { i ->
             val o = arr.getJSONObject(i)
-            Place(name = o.optString("name").ifBlank { "Ort ${i + 1}" }, description = o.optString("beschreibung"), tags = cleanTags(o.optString("tags"), TagField.LOCATION))
+            Place(name = o.optString("name").ifBlank { "Ort ${i + 1}" }, description = o.optString("beschreibung"), background = o.optString("hintergrund"), lights = o.optString("licht"))
         }
     }
 
@@ -1377,6 +1463,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (downloads[m.id] !is DownloadState.Running) downloads[m.id] = if (m.isDownloaded(context)) DownloadState.Done else DownloadState.Missing
         }
         fundus = repo.loadFundus()
+        // Neuer Stil „Kino-Foto“ auch für alte Fundus-Dateien
+        if (fundus.styles.none { it.id == "stil-kino" }) fundus = fundus.copy(styles = listOf(Fundus.mossStyles.first()) + fundus.styles)
         genres.clear()
         genres.addAll(repo.loadGenres())
         writingStyles.clear()

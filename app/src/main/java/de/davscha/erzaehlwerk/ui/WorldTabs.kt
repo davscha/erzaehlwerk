@@ -139,26 +139,7 @@ private fun PersonDialog(vm: AppViewModel, original: Person, onClose: () -> Unit
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (Edition.PRO) {
-                TagInput(
-                    value = p.appearance,
-                    onChange = { p = p.copy(appearance = it) },
-                    label = "Aussehen (Tags, ohne Kleidung)",
-                    field = TagField.APPEARANCE,
-                    placeholder = "long hair, blonde hair, green eyes, glasses",
-                ) {
-                    IconButton(onClick = {
-                        helping = true
-                        scope.launch {
-                            runCatching { vm.tagsFor("${p.name}. ${p.description}", TagField.APPEARANCE) }
-                                .onSuccess { p = p.copy(appearance = it) }
-                                .onFailure { Toast.makeText(context, it.message ?: "Fehler", Toast.LENGTH_LONG).show() }
-                            helping = false
-                        }
-                    }, enabled = !helping && p.description.isNotBlank()) {
-                        if (helping) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Icon(Icons.Default.AutoFixHigh, "Aus der Beschreibung")
-                    }
-                    IconButton(onClick = { p = p.copy(appearance = TagLibrary.randomAppearance()) }) { Icon(Icons.Default.Casino, "Aussehen würfeln") }
-                }
+                LooksFields(vm, p) { p = it }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box {
                         TextButton(onClick = { outfitMenu = true }) { Text("👗 " + (vm.outfit(p.outfitId)?.name ?: "Keine besondere Kleidung")) }
@@ -178,7 +159,7 @@ private fun PersonDialog(vm: AppViewModel, original: Person, onClose: () -> Unit
                     IconButton(onClick = { p = p.copy(seed = (1..999_999_999L).random()) }) { Icon(Icons.Default.Casino, "Würfeln") }
                 }
                 }
-                PaintBox(vm, p.id, vm.image(preview), p.emoji, p.appearance.isNotBlank() && p.name.isNotBlank()) { vm.paintPerson(p.copy(preview = preview)) }
+                PaintBox(vm, p.id, vm.image(preview), p.emoji, p.name.isNotBlank()) { vm.paintPerson(p.copy(preview = preview)) }
             }
         },
         confirmButton = { TextButton(onClick = { vm.savePerson(p.copy(name = p.name.trim(), preview = preview)); onClose() }, enabled = p.name.isNotBlank()) { Text("Speichern") } },
@@ -228,7 +209,7 @@ fun PlacesTab(vm: AppViewModel, book: Book) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             items(vm.world.places, key = { it.id }) { pl ->
-                ItemCard(vm.image(pl.preview), "🏞️", pl.name, pl.description.ifBlank { pl.tags }, vm.painting[pl.id]) { edit = pl }
+                ItemCard(vm.image(pl.preview), "🏞️", pl.name, pl.description.ifBlank { pl.background }, vm.painting[pl.id]) { edit = pl }
             }
         }
     }
@@ -255,22 +236,8 @@ private fun PlaceDialog(vm: AppViewModel, original: Place, onClose: () -> Unit) 
                     minLines = 3,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                if (Edition.PRO) {
-                TagInput(value = pl.tags, onChange = { pl = pl.copy(tags = it) }, label = "Bild-Tags", field = TagField.LOCATION, placeholder = "castle, night, moonlight, fog") {
-                    IconButton(onClick = {
-                        helping = true
-                        scope.launch {
-                            runCatching { vm.tagsFor("${pl.name}. ${pl.description}", TagField.LOCATION) }
-                                .onSuccess { pl = pl.copy(tags = it) }
-                                .onFailure { Toast.makeText(context, it.message ?: "Fehler", Toast.LENGTH_LONG).show() }
-                            helping = false
-                        }
-                    }, enabled = !helping && (pl.description.isNotBlank() || pl.name.isNotBlank())) {
-                        if (helping) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Icon(Icons.Default.AutoFixHigh, "Aus der Beschreibung")
-                    }
-                }
-                }
-                PaintBox(vm, pl.id, vm.image(preview), "🏞️", pl.tags.isNotBlank()) { vm.paintPlace(pl.copy(preview = preview)) }
+                if (Edition.PRO) PlaceFields(vm, pl) { pl = it }
+                PaintBox(vm, pl.id, vm.image(preview), "🏞️", pl.background.isNotBlank()) { vm.paintPlace(pl.copy(preview = preview)) }
             }
         },
         confirmButton = { TextButton(onClick = { vm.savePlace(pl.copy(name = pl.name.trim(), preview = preview)); onClose() }, enabled = pl.name.isNotBlank()) { Text("Speichern") } },

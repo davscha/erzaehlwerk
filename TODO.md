@@ -20,3 +20,4 @@ Android-App fürs Tablet: Die KI schreibt Romane, du gibst die Richtung vor – 
 - [x] Szenenbilder mit mehreren Figuren („👥 alle“), KI beschreibt den Moment in Sätzen; Titelbild mit Titel-Schriftzug
 - [x] **Kapitel als Comicseite** (4/6/8/9 Panels in einem Bild, deutsche Bildunterschriften), auch im PDF/EPUB
 - [x] Zwei kostenlose Versionen: Pro (Ollama + ComfyUI) und Lite (nur auf dem Gerät), Titelbild aus der Galerie
+- [x] Bilder als MOSS-JSON: Figuren mit Gesicht/Augen/Körper/Haut/Haaren, Kleidung Teil für Teil, Ort mit Hintergrund und Licht; pose = Haltung einer Figur, action = Zusammenspiel; Stil frei wählbar (kein Anime-Zwang)

@@ -25,8 +25,15 @@ data class Person(
     val gender: Gender = Gender.UNKNOWN,
     /** Persönlichkeit, Hintergrund, Sprechweise – für den Text */
     val description: String = "",
-    /** Aussehen als Bild-Tags (ohne Kleidung) */
+    /** Besonderheiten (früher: Aussehen als Tags) – kommt als „details“ ins Bild */
     val appearance: String = "",
+    /** Aussehen für MOSS Image, auf Englisch */
+    val age: String = "",
+    val face: String = "",
+    val eyes: String = "",
+    val body: String = "",
+    val skin: String = "",
+    val hair: String = "",
     /** Vorschaubild (Dateiname im Bilder-Ordner des Buchs) */
     val preview: String = "",
     /** Standard-Kleidung aus dem Fundus (Id) */
@@ -37,12 +44,14 @@ data class Person(
     fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("emoji", emoji).put("rolle", role.name)
         .put("geschlecht", gender.name).put("beschreibung", description).put("aussehen", appearance)
         .put("vorschau", preview).put("outfit", outfitId).put("startwert", seed)
+        .put("alter", age).put("gesicht", face).put("augen", eyes).put("koerper", body).put("haut", skin).put("haare", hair)
 
     companion object {
         fun fromJson(o: JSONObject) = Person(
             o.optString("id").ifEmpty { UUID.randomUUID().toString() }, o.optString("name"), o.optString("emoji").ifEmpty { "🙂" },
             runCatching { Role.valueOf(o.optString("rolle")) }.getOrDefault(Role.NEBEN), Gender.of(o.optString("geschlecht")),
             o.optString("beschreibung"), o.optString("aussehen"), o.optString("vorschau"), o.optString("outfit"), o.optLong("startwert"),
+            o.optString("alter"), o.optString("gesicht"), o.optString("augen"), o.optString("koerper"), o.optString("haut"), o.optString("haare"),
         )
     }
 }
@@ -53,16 +62,21 @@ data class Place(
     val name: String = "",
     /** Wie der Ort ist – für den Text */
     val description: String = "",
-    /** Bild-Tags */
+    /** Alt: Bild-Tags (werden beim Laden zum Hintergrund) */
     val tags: String = "",
     val preview: String = "",
+    /** Für MOSS Image, auf Englisch: was man sieht und wie das Licht ist */
+    val background: String = "",
+    val lights: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("beschreibung", description).put("tags", tags).put("vorschau", preview)
+        .put("hintergrund", background).put("licht", lights)
 
     companion object {
         fun fromJson(o: JSONObject) = Place(
             o.optString("id").ifEmpty { UUID.randomUUID().toString() }, o.optString("name"), o.optString("beschreibung"),
             o.optString("tags"), o.optString("vorschau"),
+            o.optString("hintergrund").ifBlank { o.optString("tags") }, o.optString("licht"),
         )
     }
 }
@@ -89,14 +103,22 @@ data class Outfit(
     val preview: String = "",
     /** Wer die Vorschau trägt: 1girl oder 1boy */
     val model: String = "1girl",
+    /** Einzelne Teile für MOSS Image: Teil (z. B. jacket) → Beschreibung auf Englisch */
+    val pieces: List<Pair<String, String>> = emptyList(),
 ) {
     fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("tags", tags).put("vorschau", preview).put("model", model)
+        .put("teile", JSONArray(pieces.map { (k, v) -> JSONObject().put("teil", k).put("text", v) }))
 
     companion object {
-        fun fromJson(o: JSONObject) = Outfit(
-            o.optString("id").ifEmpty { UUID.randomUUID().toString() }, o.optString("name"), o.optString("tags"),
-            o.optString("vorschau"), o.optString("model").ifEmpty { "1girl" },
-        )
+        fun fromJson(o: JSONObject): Outfit {
+            val teile = o.optJSONArray("teile")?.let { a -> List(a.length()) { a.getJSONObject(it).let { t -> t.optString("teil") to t.optString("text") } } }.orEmpty()
+            return Outfit(
+                o.optString("id").ifEmpty { UUID.randomUUID().toString() }, o.optString("name"), o.optString("tags"),
+                o.optString("vorschau"), o.optString("model").ifEmpty { "1girl" },
+                // Alte Tag-Kleidung wird zu einem Teil „outfit“
+                teile.ifEmpty { if (o.optString("tags").isNotBlank()) listOf("outfit" to o.optString("tags")) else emptyList() },
+            )
+        }
     }
 }
 
@@ -119,7 +141,7 @@ data class Style(
         fun fromJson(o: JSONObject) = Style(
             o.optString("id").ifEmpty { UUID.randomUUID().toString() }, o.optString("name"),
             // Alte LoRA-Stile: Stil-Beschreibung nachliefern
-            o.optString("prompt").ifBlank { if (o.optString("lora").isNotBlank()) "anime illustration, clean lineart, soft colors" else "" },
+            o.optString("prompt"),
             o.optString("lora"), o.optDouble("staerke", 1.0).toFloat(),
         )
     }
@@ -143,6 +165,7 @@ data class Fundus(val clothing: List<Outfit> = emptyList(), val styles: List<Sty
 
         /** Stile für MOSS Image (in Worten) */
         val mossStyles = listOf(
+            Style(id = "stil-kino", name = "Kino-Foto", prompt = "cinematic photography, faded glow theme, vignette, film grain"),
             Style(id = "stil-disney", name = "Disney-Zeichentrick", prompt = "classic Disney animation style, hand-drawn, soft colors, expressive faces"),
             Style(id = "stil-anime", name = "Anime", prompt = "anime illustration, clean lineart, vibrant colors"),
             Style(id = "stil-comic", name = "Comic", prompt = "western comic book art, bold ink outlines, flat colors"),
@@ -167,16 +190,68 @@ data class Fundus(val clothing: List<Outfit> = emptyList(), val styles: List<Sty
     }
 }
 
-/** Prompts für ComfyUI: Basis + Stil-Trigger + Bausteine */
+/** Prompts für MOSS Image: ein JSON mit Stil, Figuren, Handlung, Hintergrund, Licht und Kamera */
 object ImagePrompt {
     fun join(vararg parts: String?): String = parts.filterNotNull()
         .flatMap { it.split(',', '\n') }.map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString(", ")
 
-    /** Figur in Worten: „a woman, long red hair, green eyes, wearing brown coat, white sweater“ */
-    fun looks(p: Person, outfit: Outfit?) = join(p.gender.word, p.appearance, outfit?.tags?.takeIf { it.isNotBlank() }?.let { "wearing $it" })
+    /** Was eine Figur pro Bild macht: eigene Haltung und Gesichtsausdruck */
+    data class Moment(val pose: String = "", val expression: String = "")
 
-    fun person(p: Person, outfit: Outfit?) = "Portrait of a single character: ${looks(p, outfit)}. Upper body, looking at the viewer, plain background."
-    fun place(pl: Place) = "Scenery without people: ${join(pl.tags)}."
-    fun outfit(o: Outfit) = "Full body front view of ${if (o.model == "1boy") "a man" else "a young woman"} wearing ${join(o.tags)}, standing, plain white background."
-    const val SINGLE_NEGATIVE = "multiple views, reference sheet, character sheet, multiple girls, multiple boys"
+    private fun JSONObject.putText(k: String, v: String?) = apply { if (!v.isNullOrBlank()) put(k, v.trim()) }
+
+    fun clothing(o: Outfit?): JSONObject? {
+        val parts = o?.pieces?.filter { it.second.isNotBlank() }.orEmpty()
+        if (parts.isEmpty()) return null
+        return JSONObject().apply { parts.forEach { (k, v) -> put(k.trim().ifBlank { "outfit" }, v.trim()) } }
+    }
+
+    /** Eine Figur so, wie MOSS sie versteht */
+    fun figure(p: Person, outfit: Outfit?, m: Moment = Moment()): JSONObject {
+        val o = JSONObject().putText("name", p.name)
+        p.age.trim().toIntOrNull()?.let { o.put("age", it) } ?: o.putText("age", p.age)
+        when (p.gender) { Gender.MALE -> o.put("gender", "male"); Gender.FEMALE -> o.put("gender", "female"); Gender.DIVERSE -> o.put("gender", "non-binary"); else -> {} }
+        val shapes = JSONObject().putText("face", p.face).putText("eyes", p.eyes).putText("body", p.body)
+        if (shapes.length() > 0) o.put("shapes", shapes)
+        o.putText("skin", p.skin).putText("hair", p.hair).putText("details", p.appearance)
+        clothing(outfit)?.let { o.put("clothing", it) }
+        o.putText("pose", m.pose).putText("face_expression", m.expression)
+        return o
+    }
+
+    /** Das ganze Bild als JSON-Text */
+    fun build(
+        style: String, figures: List<JSONObject> = emptyList(), action: String = "", background: String = "", lights: String = "",
+        camera: String = "", extra: Map<String, String> = emptyMap(),
+    ): String {
+        val o = JSONObject().putText("style", style)
+        if (figures.isNotEmpty()) o.put("figures", JSONArray(figures))
+        o.putText("action", action).putText("background", background).putText("lights", lights).putText("camera", camera)
+        extra.forEach { (k, v) -> o.putText(k, v) }
+        return o.toString(2)
+    }
+
+    /** Aussehen in einer Zeile – für die Texte der KI */
+    fun looks(p: Person, outfit: Outfit?) = join(
+        p.gender.word, p.age.takeIf { it.isNotBlank() }?.let { "age $it" }, p.face, p.eyes, p.body, p.skin, p.hair, p.appearance,
+        outfit?.pieces?.joinToString(", ") { it.second }?.takeIf { it.isNotBlank() }?.let { "wearing $it" },
+    )
+
+    fun person(style: String, p: Person, outfit: Outfit?) = build(
+        style, listOf(figure(p, outfit, Moment("standing, relaxed, looking at the camera", "calm, friendly"))),
+        background = "plain neutral studio background", lights = "soft even studio light", camera = "cowboy shot, front view, single person",
+    )
+
+    fun place(style: String, pl: Place) = build(
+        style, action = "empty scene, no people", background = pl.background.ifBlank { pl.tags }, lights = pl.lights, camera = "wide establishing shot",
+    )
+
+    fun outfit(style: String, o: Outfit): String {
+        val f = JSONObject().put("gender", if (o.model == "1boy") "male" else "female").put("age", 25)
+        clothing(o)?.let { f.put("clothing", it) }
+        f.put("pose", "standing straight, arms relaxed at the sides")
+        return build(style, listOf(f), background = "plain white studio background", lights = "soft even studio light", camera = "full body shot, front view, single person")
+    }
+
+    const val SINGLE_NEGATIVE = "multiple views, reference sheet, character sheet"
 }

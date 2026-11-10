@@ -79,7 +79,7 @@ fun FundusScreen(vm: AppViewModel) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             if (tab == 0) items(vm.fundus.clothing, key = { it.id }) { o ->
-                ItemCard(vm.fundusImage(o.preview), "👗", o.name, o.tags, vm.painting[o.id]) { editOutfit = o }
+                ItemCard(vm.fundusImage(o.preview), "👗", o.name, o.pieces.joinToString(" · ") { it.first }, vm.painting[o.id]) { editOutfit = o }
             } else items(vm.fundus.styles, key = { it.id }) { s ->
                 Card(onClick = { editStyle = s }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                     Column(Modifier.padding(14.dp)) {
@@ -103,16 +103,16 @@ private fun OutfitDialog(vm: AppViewModel, original: Outfit, onClose: () -> Unit
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(value = o.name, onValueChange = { o = o.copy(name = it) }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                TagInput(value = o.tags, onChange = { o = o.copy(tags = it) }, label = "Tags", field = TagField.CLOTHING, placeholder = "brown coat, white sweater, black pants")
+                ClothingPieces(vm, o) { o = it }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Vorschau trägt:", fontSize = 13.sp)
                     FilterChip(selected = o.model == "1girl", onClick = { o = o.copy(model = "1girl") }, label = { Text("👩 Frau") })
                     FilterChip(selected = o.model == "1boy", onClick = { o = o.copy(model = "1boy") }, label = { Text("👨 Mann") })
                 }
-                PaintBox(vm, o.id, vm.fundusImage(preview), "👗", o.tags.isNotBlank()) { vm.paintOutfit(o.copy(preview = preview)) }
+                PaintBox(vm, o.id, vm.fundusImage(preview), "👗", o.pieces.any { it.second.isNotBlank() }) { vm.paintOutfit(o.copy(preview = preview)) }
             }
         },
-        confirmButton = { TextButton(onClick = { vm.saveOutfit(o.copy(preview = preview)); onClose() }, enabled = o.name.isNotBlank()) { Text("Speichern") } },
+        confirmButton = { TextButton(onClick = { vm.saveOutfit(o.copy(preview = preview, pieces = o.pieces.filter { it.second.isNotBlank() }.map { it.first.trim().ifBlank { "outfit" } to it.second.trim() })); onClose() }, enabled = o.name.isNotBlank()) { Text("Speichern") } },
         dismissButton = {
             Row {
                 if (!isNew) TextButton(onClick = { vm.deleteOutfit(o.id); onClose() }) { Text("Löschen", color = MaterialTheme.colorScheme.error) }

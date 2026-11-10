@@ -45,7 +45,7 @@ object CharacterFunImport {
         return List(a.length()) { i ->
             val p = a.getJSONObject(i)
             val img = p.optString("vorschau").takeIf { it.isNotBlank() }?.let { File(dir, "Fundus/$it") }?.takeIf { it.exists() }
-            Place(name = p.optString("name"), tags = p.optString("tags")) to img
+            Place(name = p.optString("name"), tags = p.optString("tags"), background = p.optString("tags")) to img
         }
     }
 
@@ -56,7 +56,7 @@ object CharacterFunImport {
         val clothing = if (c == null) emptyList() else List(c.length()) { i ->
             val p = c.getJSONObject(i)
             val img = p.optString("vorschau").takeIf { it.isNotBlank() }?.let { File(dir, "Fundus/$it") }?.takeIf { it.exists() }
-            Outfit(id = p.optString("id"), name = p.optString("name"), tags = p.optString("tags"), model = p.optString("model").ifEmpty { "1girl" }) to img
+            Outfit(id = p.optString("id"), name = p.optString("name"), tags = p.optString("tags"), model = p.optString("model").ifEmpty { "1girl" }, pieces = p.optString("tags").takeIf { it.isNotBlank() }?.let { listOf("outfit" to it) }.orEmpty()) to img
         }
         val s = o.optJSONArray("stile")
         val styles = if (s == null) emptyList() else List(s.length()) { i -> Style.fromJson(s.getJSONObject(i)) }
