@@ -50,8 +50,10 @@ data class Person(
         fun fromJson(o: JSONObject) = Person(
             o.optString("id").ifEmpty { UUID.randomUUID().toString() }, o.optString("name"), o.optString("emoji").ifEmpty { "🙂" },
             runCatching { Role.valueOf(o.optString("rolle")) }.getOrDefault(Role.NEBEN), Gender.of(o.optString("geschlecht")),
-            o.optString("beschreibung"), o.optString("aussehen"), o.optString("vorschau"), o.optString("outfit"), o.optLong("startwert"),
-            o.optString("alter"), o.optString("gesicht"), o.optString("augen"), o.optString("koerper"), o.optString("haut"), o.optString("haare"),
+            description = o.optString("beschreibung"), appearance = o.optString("aussehen"), preview = o.optString("vorschau"),
+            outfitId = o.optString("outfit"), seed = o.optLong("startwert"),
+            age = o.optString("alter"), face = o.optString("gesicht"), eyes = o.optString("augen"), body = o.optString("koerper"),
+            skin = o.optString("haut"), hair = o.optString("haare"),
         )
     }
 }
